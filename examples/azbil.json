@@ -1,0 +1,13 @@
+{
+  "device": "azbil",
+  "port": "COM8",
+  "baudrate": 19200,
+  "parity": "E",
+  "stopbits": 1,
+  "timeout_s": 0.5,
+  "start_address": 1,
+  "end_address": 6,
+  "balance_protocol": "gs_cpa",
+  "balance_lines": 10,
+  "balance_start_output": false
+}
