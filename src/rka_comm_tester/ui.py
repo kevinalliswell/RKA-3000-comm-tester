@@ -348,6 +348,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stress_label)
         self.stress_detail = QPlainTextEdit()
         self.stress_detail.setReadOnly(True)
+        self.stress_detail.setMaximumBlockCount(1000)
         layout.addWidget(self.stress_detail, 1)
 
     def _build_log_tab(self) -> None:
@@ -359,6 +360,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.log_label)
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
+        self.log_view.setMaximumBlockCount(1000)
         layout.addWidget(self.log_view, 1)
         row = QHBoxLayout()
         open_button = QPushButton("打开日志目录")
@@ -389,11 +391,11 @@ class MainWindow(QMainWindow):
         self.stop_scan()
         self.stop_stress()
         self.session.lock()
-        self.setEnabled(False)
+        self.centralWidget().setEnabled(False)
         dialog = LoginDialog(self.auth_store, self)
         if dialog.exec() == QDialog.Accepted and dialog.session:
             self.session = dialog.session
-            self.setEnabled(True)
+            self.centralWidget().setEnabled(True)
             self.log_view.appendPlainText("管理员重新登录。")
         else:
             self._closing = True

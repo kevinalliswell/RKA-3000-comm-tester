@@ -1,0 +1,86 @@
+name: Windows build and prerelease
+
+on:
+  push:
+    branches: [main, codex/windows-write-stress-release]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: x64
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev,build]"
+      - name: Tests and lint
+        run: |
+          python -m pytest -q
+          python -m ruff check .
+      - name: Build portable folder
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name RKACommTester --paths src --collect-submodules rka_comm_tester._vendor launcher.py
+      - name: Smoke portable executable
+        shell: pwsh
+        run: |
+          & .\dist\RKACommTester\RKACommTester.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Portable self-test failed: $LASTEXITCODE" }
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist\RKACommTester\README.md
+          Copy-Item examples dist\RKACommTester\examples -Recurse
+          Compress-Archive -Path dist\RKACommTester -DestinationPath dist\RKA-Comm-Tester-Portable-0.2.0-rc1-win-x64.zip
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*" -Filter ISCC.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $compiler) { throw "Inno Setup compiler not found" }
+          & $compiler packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+      - name: Smoke installer and uninstall
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\RKA-Comm-Tester-Setup-*.exe | Select-Object -First 1 -ExpandProperty FullName
+          $target = Join-Path $env:RUNNER_TEMP "RKACommTesterInstall"
+          $result = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$target" -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Install failed: $($result.ExitCode)" }
+          & (Join-Path $target "RKACommTester.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed self-test failed: $LASTEXITCODE" }
+          $result = Start-Process -FilePath (Join-Path $target "unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Uninstall failed: $($result.ExitCode)" }
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\RKA-Comm-Tester-*.exe,dist\RKA-Comm-Tester-*.zip | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content dist\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rka-comm-tester-windows
+          path: |
+            dist/RKA-Comm-Tester-*.exe
+            dist/RKA-Comm-Tester-*.zip
+            dist/SHA256SUMS.txt
+      - name: Private prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem dist\RKA-Comm-Tester-*.exe,dist\RKA-Comm-Tester-*.zip | ForEach-Object { $_.FullName })
+          $assets += (Resolve-Path dist\SHA256SUMS.txt).Path
+          gh release create $env:GITHUB_REF_NAME $assets --title "RKA-3000 通信测试工具 $env:GITHUB_REF_NAME" --notes-file packaging\RELEASE_NOTES.md --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "Release creation failed: $LASTEXITCODE" }

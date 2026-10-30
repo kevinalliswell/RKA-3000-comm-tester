@@ -21,8 +21,10 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
   an ACK or an unstable zero.
 
-This tester calls only read/probe methods. It requires live MFC scale metadata before
-displaying engineering flow units and exposes no setpoint or tare action in its UI/CLI.
+The GUI requires live MFC scale metadata before displaying engineering flow units or
+allowing a manually confirmed, single SP-0 write. It also offers single TAIE SV writes
+and balance tare with readback. The CLI remains read-only. Real-device writes are never
+scheduled in a loop and are not automatically retried.
 Copies were extracted from RKA-3000-desktop commit d2635df. The same-owner upstream
 repositories and exact pinned revisions are listed below.
 
