@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from . import __version__
@@ -24,9 +26,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         from ._vendor.azbil_mfc.protocol import build_read_frame
         from ._vendor.taie_temp.modbus_rtu import append_crc
+        from .auth import AdminSession
 
         assert build_read_frame(1, 0x04B6, 1)
         assert append_crc(b"\x01\x03\x00\x8a\x00\x01")
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from .ui import MainWindow
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            window = MainWindow(setup_logging(root / "self-test.log"),
+                                AuthStore(root / "auth.json"), AdminSession("self_test"))
+            window.close()
+            window.deleteLater()
+            application.processEvents()
         return 0
     log_path = setup_logging(args.log_file, console=args.scan)
     if args.scan:

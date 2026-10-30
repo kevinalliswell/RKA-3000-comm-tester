@@ -56,6 +56,10 @@ class WriteUncertain(Exception):
     """The command may have reached the device, but confirmation is absent."""
 
 
+class WriteVerificationFailed(Exception):
+    """A response arrived, but did not match the requested write."""
+
+
 class _TaieSession:
     def __init__(self, cfg: ScanConfig, address: int) -> None:
         from ._vendor.taie_temp.modbus_rtu import SerialSettings, TaieModbusRtuClient
@@ -89,13 +93,15 @@ class _TaieSession:
         try:
             echo = self.client.write_single_register(0x0000, raw)
         except Exception as exc:
-            from ._vendor.taie_temp.modbus_rtu import ModbusExceptionResponse
+            from ._vendor.taie_temp.modbus_rtu import ModbusExceptionResponse, ModbusProtocolError
 
             if isinstance(exc, ModbusExceptionResponse):
                 raise DeviceRejected(str(exc)) from exc
+            if isinstance(exc, ModbusProtocolError):
+                raise WriteVerificationFailed(str(exc)) from exc
             raise WriteUncertain(str(exc)) from exc
         if echo != raw:
-            raise WriteUncertain(f"SV 写入回显不符: {echo} != {raw}")
+            raise WriteVerificationFailed(f"SV 写入回显不符: {echo} != {raw}")
         return None
 
 
@@ -139,7 +145,7 @@ class _AzbilSession:
         )
 
     def write_once(self, target: float) -> WritePreview | None:
-        from ._vendor.azbil_mfc.exceptions import CPLDeviceError
+        from ._vendor.azbil_mfc.exceptions import CPLChecksumError, CPLDeviceError, CPLFrameError
         from ._vendor.azbil_mfc.registers import EEPROMAddress
 
         assert self.scale is not None
@@ -148,6 +154,8 @@ class _AzbilSession:
             self.bus.write_registers(self.address, EEPROMAddress.SP_0, [raw])
         except CPLDeviceError as exc:
             raise DeviceRejected(str(exc)) from exc
+        except (CPLFrameError, CPLChecksumError) as exc:
+            raise WriteVerificationFailed(str(exc)) from exc
         except Exception as exc:
             raise WriteUncertain(str(exc)) from exc
         return None
@@ -254,6 +262,8 @@ def execute_write(
                 status, detail = "success", "写入与回读一致"
         except DeviceRejected as exc:
             status, detail = "failed", f"设备明确拒绝: {exc}"
+        except WriteVerificationFailed as exc:
+            status, detail = "failed", f"写入应答验证失败: {exc}"
         except Exception as exc:
             status, detail = "unknown", f"写入或回读未确认: {exc}"
     result = WriteResult(cfg.device, cfg.port, address, target, before, after, active_sp,
