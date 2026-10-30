@@ -21,6 +21,8 @@ class ScanConfig:
     balance_protocol: str = "gs_cpa"
     balance_lines: int = 10
     balance_start_output: bool = False
+    temp_sv_min_c: float = 0.0
+    temp_sv_max_c: float = 1000.0
 
     def __post_init__(self) -> None:
         if self.device not in {"taie", "azbil", "balance"}:
@@ -46,6 +48,10 @@ class ScanConfig:
             raise ValueError("天平读取帧数须在 1–100 之间")
         if type(self.balance_start_output) is not bool:
             raise ValueError("天平连续输出选项须为布尔值")
+        if (not math.isfinite(self.temp_sv_min_c) or not math.isfinite(self.temp_sv_max_c)
+                or self.temp_sv_min_c >= self.temp_sv_max_c
+                or self.temp_sv_min_c < -1000 or self.temp_sv_max_c > 3000):
+            raise ValueError("温控写入上下限无效")
 
     @property
     def addresses(self) -> range:

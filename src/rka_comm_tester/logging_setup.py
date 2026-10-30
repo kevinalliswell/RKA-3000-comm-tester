@@ -6,9 +6,11 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .paths import data_dir
+
 
 def default_log_path() -> Path:
-    return Path.home() / ".rka-comm-tester" / "logs" / "communication.log"
+    return data_dir() / "logs" / "communication.log"
 
 
 def setup_logging(path: Path | None = None, *, console: bool = False) -> Path:

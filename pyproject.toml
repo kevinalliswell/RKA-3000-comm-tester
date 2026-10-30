@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rka-comm-tester"
-version = "0.1.0"
-description = "Read-only serial communication tester for TAIE, Azbil MFC and balances"
+version = "0.2.0rc1"
+description = "Windows serial diagnostic and stability tester for TAIE, Azbil MFC and balances"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["PySide6-Essentials>=6.8", "pyserial>=3.5"]
+dependencies = ["PySide6-Essentials>=6.8", "pyserial>=3.5", "psutil>=6"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "ruff>=0.9"]
+build = ["pyinstaller>=6.10"]
 
 [project.scripts]
 rka-comm-tester = "rka_comm_tester.app:main"
