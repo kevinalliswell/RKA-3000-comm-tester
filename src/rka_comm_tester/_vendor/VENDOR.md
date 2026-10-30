@@ -19,7 +19,9 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
 - `balance_serial/protocols/{gs_cpa,longteng}.py`: accept only documented full weight
   frames; Longteng `ST` frames are marked stable.
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
-  an ACK or an unstable zero.
+  an ACK or an unstable zero; log raw serial frames for field diagnosis.
+- `taie_temp/modbus_rtu.py` and `azbil_mfc/bus.py`: log complete or partial raw frames
+  before raising protocol errors so exported diagnostics retain anomalous traffic.
 
 The GUI requires live MFC scale metadata before displaying engineering flow units or
 allowing a manually confirmed, single SP-0 write. It also offers single TAIE SV writes

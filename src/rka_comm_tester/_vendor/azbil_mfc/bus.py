@@ -156,10 +156,10 @@ class RS485Bus:
 
         response = self._serial.read_until(b"\n")
         self._last_io_at = time.monotonic()
+        if response:
+            logger.debug("接收: %s", response.hex(" "))
         if not response or not response.endswith(b"\n"):
             raise CPLTimeoutError("接收应答超时")
-
-        logger.debug("接收: %s", response.hex(" "))
         return response
 
     def _exchange(self, frame: bytes, *, retries: int | None = None) -> tuple[int, str, Optional[List[int]]]:

@@ -4,6 +4,7 @@ import pytest
 
 from rka_comm_tester.config import ScanConfig
 from rka_comm_tester.runs import RunStore, export_bundle
+from rka_comm_tester.sources import RealReadSource
 from rka_comm_tester.stress import StressConfig, run_stress
 
 
@@ -43,3 +44,19 @@ def test_balance_tare_cannot_be_stressed():
     profile = ScanConfig(device="balance", port="SIM")
     with pytest.raises(ValueError, match="不参与"):
         StressConfig(profile, "sim_write", target_hz=5, duration_s=1)
+
+
+@pytest.mark.parametrize("device", ["taie", "azbil"])
+def test_protocol_simulated_write_cycle(device, tmp_path):
+    profile = ScanConfig(device=device, port="SIM", start_address=1, end_address=1,
+                         parity="E" if device == "azbil" else "N")
+    cfg = StressConfig(profile, "sim_write", target_hz=5, duration_s=0.25)
+    summary, _ = run_stress(cfg, store=RunStore(cfg.mode, profile, root=tmp_path))
+    assert summary["succeeded"] >= 1
+    assert summary["errors"] == 0
+
+
+def test_real_source_has_no_automatic_write_cycle():
+    source = RealReadSource(ScanConfig(device="azbil", port="COM7", parity="E"))
+    with pytest.raises(PermissionError, match="禁用"):
+        source.write_cycle(1)

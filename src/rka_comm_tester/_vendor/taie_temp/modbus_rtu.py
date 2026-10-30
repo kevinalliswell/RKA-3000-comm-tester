@@ -14,6 +14,7 @@ allows reading or writing up to 8 registers per request.
 from __future__ import annotations
 
 import argparse
+import logging
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -21,6 +22,8 @@ from typing import Iterable
 import serial
 
 from .register_addresses import TAIE_REGISTER_ADDRESS_HEX
+
+logger = logging.getLogger(__name__)
 
 
 MODBUS_MAX_REGISTERS_PER_REQUEST = 8
@@ -175,6 +178,7 @@ class TaieModbusRtuClient:
                 break
             chunks.extend(chunk)
         if len(chunks) != size:
+            logger.warning("TAIE incomplete response: wanted=%d received=%s", size, bytes(chunks).hex(" "))
             raise ModbusTimeoutError(f"Timed out while reading {size} bytes, got {len(chunks)} bytes")
         return bytes(chunks)
 
@@ -186,6 +190,7 @@ class TaieModbusRtuClient:
             if remaining > 0:
                 time.sleep(remaining)
         port.reset_input_buffer()
+        logger.debug("TAIE TX: %s", request_frame.hex(" "))
         port.write(request_frame)
         port.flush()
         if self.settings.post_write_delay > 0:
@@ -201,6 +206,7 @@ class TaieModbusRtuClient:
         if function_code == (expected_function_code | 0x80):
             tail = self._read_exact(3)
             frame = head + tail
+            logger.debug("TAIE RX: %s", frame.hex(" "))
             validate_crc(frame)
             self._last_transaction_completed_at = time.monotonic()
             raise ModbusExceptionResponse(expected_function_code, tail[0])
@@ -224,6 +230,7 @@ class TaieModbusRtuClient:
                 f"Unsupported function code 0x{expected_function_code:02X}"
             )
 
+        logger.debug("TAIE RX: %s", frame.hex(" "))
         validate_crc(frame)
         if expected_function_code in (0x06, 0x10) and frame[2:6] != request_frame[2:6]:
             raise ModbusProtocolError("Write response does not echo requested address and value/count")
