@@ -130,6 +130,8 @@ def test_balance_parsers_accept_only_documented_reading_frames():
     assert gs.parse_message("+0277.19 G U").stable is False
     assert gs.parse_message("A01").kind == "ack"
     assert gs.parse_message("E01").kind == "error"
+    assert GSCpaProtocol(auto_continuous_output=True).shutdown_commands() == (b"O0\r\n",)
+    assert GSCpaProtocol(auto_continuous_output=False).shutdown_commands() == ()
     assert gs.parse_message("ERROR 277.19").kind == "unknown"
     longteng = LongtengProtocol()
     assert longteng.parse_message("ST,12.345").stable is True

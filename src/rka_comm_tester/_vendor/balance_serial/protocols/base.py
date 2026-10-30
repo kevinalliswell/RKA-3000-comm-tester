@@ -12,6 +12,9 @@ class BalanceProtocol(ABC):
     def startup_commands(self) -> Sequence[bytes]:
         return ()
 
+    def shutdown_commands(self) -> Sequence[bytes]:
+        return ()
+
     @abstractmethod
     def tare_command(self) -> bytes:
         raise NotImplementedError

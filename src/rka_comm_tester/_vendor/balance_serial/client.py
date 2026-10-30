@@ -49,6 +49,10 @@ class BalanceClient:
         for command in self.protocol.startup_commands():
             self.send_bytes(command)
 
+    def shutdown_device(self) -> None:
+        for command in self.protocol.shutdown_commands():
+            self.send_bytes(command)
+
     def send_bytes(self, data: bytes) -> None:
         self._ensure_open()
         assert self._serial is not None

@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -21,6 +22,9 @@ def test_window_starts_without_device_or_port(tmp_path, monkeypatch):
     window._show_result(ScanResult("taie", "COM7", 1, "offline", detail="timeout"))
     assert window.table.rowCount() == 1
     assert window.table.item(0, 4).text() == "offline"
+    window.worker = SimpleNamespace(was_cancelled=True, isRunning=lambda: False)
+    window._scan_finished()
+    assert window.status_label.text() == "扫描已停止，结果不完整。"
     window.close()
     window.deleteLater()
     _APP.processEvents()
