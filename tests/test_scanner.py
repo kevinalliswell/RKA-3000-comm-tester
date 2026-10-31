@@ -129,6 +129,7 @@ def test_balance_scan_treats_unstable_as_degraded_and_o1_as_opt_in(monkeypatch):
 
     class FakeClient:
         def __init__(self, settings, protocol):
+            assert settings.to_serial_kwargs()["write_timeout"] == settings.timeout
             self.protocol = protocol
             self.messages = iter([protocol.parse_message("+0277.19 G U")])
 

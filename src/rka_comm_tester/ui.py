@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import ScanConfig
+from .profiles import FileProfileStore
 from .scanner import ScanResult, available_ports, scan
 
 logger = logging.getLogger(__name__)
@@ -332,7 +333,7 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "保存配置", "config.local.json", "JSON (*.json)")
         if path:
-            cfg.save(path)
+            FileProfileStore(path).save(cfg)
             logger.info("config saved: %s", path)
 
     def load_config(self) -> None:
@@ -340,7 +341,9 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            cfg = ScanConfig.load(path)
+            cfg = FileProfileStore(path).load()
+            if cfg is None:
+                raise ValueError("配置文件不存在")
         except (OSError, ValueError, TypeError, KeyError) as exc:
             QMessageBox.warning(self, "配置文件无效", str(exc))
             return

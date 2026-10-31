@@ -20,6 +20,8 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   frames; Longteng `ST` frames are marked stable.
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
   an ACK or an unstable zero.
+- `balance_serial/models.py`: serial writes use the configured timeout so O1/O0 do not
+  wait indefinitely for an unavailable output buffer.
 
 This tester calls only read/probe methods. It requires live MFC scale metadata before
 displaying engineering flow units and exposes no setpoint or tare action in its UI/CLI.

@@ -1,0 +1,39 @@
+name: Checks
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: python -m pip install -e ".[dev,legacy-ui]"
+      - run: python -m pytest -q
+      - run: python -m ruff check .
+      - run: npm ci
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run check
+      - run: npm --prefix frontend run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+      - run: npm run tauri build -- --debug --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rka-comm-tester-windows-debug
+          path: src-tauri/target/debug/rka-3000-comm-tester.exe

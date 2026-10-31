@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the RKA-3000 desktop window.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

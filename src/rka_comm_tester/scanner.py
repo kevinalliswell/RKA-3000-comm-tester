@@ -3,37 +3,16 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict
 from threading import Event
 from typing import Callable, Iterator
 
 from serial.tools import list_ports
 
 from .config import ScanConfig
+from .models import PortInfo, ScanResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PortInfo:
-    device: str
-    description: str
-    hwid: str
-
-
-@dataclass(frozen=True)
-class ScanResult:
-    device: str
-    port: str
-    address: int | None
-    status: str
-    values: dict = field(default_factory=dict)
-    detail: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 def available_ports() -> list[PortInfo]:
