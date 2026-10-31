@@ -15,9 +15,20 @@
 
 完整依赖关系、任务状态与接口约定见 [分层设计](docs/architecture.md)。应用层通过注入的 `Probe`、端口枚举函数和 `ProfileStore` 使用基础设施；不导入 Qt、Tauri、HTTP 或串口库。
 
+## 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| [通讯协议与诊断边界](docs/protocols.md) | TAIE Modbus RTU、Azbil CPL、GS-CPA 与龙腾协议的帧、寄存器、状态判定和只读边界 |
+| [技术架构设计](docs/technical-architecture.md) | Tauri、Svelte、Python sidecar、进程生命周期、数据边界与 CI/CD |
+| [分层设计思路](docs/layered-design.md) | 六层职责、依赖方向、端口注入、新增协议步骤和测试对应关系 |
+| [分层与运行时细节](docs/architecture.md) | 扫描状态机、API 约定、进程收尾和扩展说明 |
+| [构建与发布](docs/releasing.md) | 版本同步、Windows 构建、发布资产和发布限制 |
+| [候选版说明](docs/release-notes.md) | 当前候选版的变更、安装和现场验收提示 |
+
 ## 下载与运行
 
-从 [GitHub Releases](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases) 选择版本；`rc` 为预发布，需在现场设备上验收后再用于正式工作。
+从 [GitHub Releases](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases) 选择版本；带 `rc` 的版本是预发布版本，正式版本也仍需在现场设备上验收后再用于生产工作。
 
 | 资产 | 用途 |
 |---|---|
