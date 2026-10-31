@@ -14,17 +14,17 @@
 
 1. 更新上述版本、`CHANGELOG.md` 与 `docs/release-notes.md`，提交并推送。
 2. 等待对应 PR 或手动 `Checks` 成功，检查 artifact。当前迁移分支可直接发布预发布，无需合并 PR。
-3. 在已验证的提交上创建并推送标签，例如当前首个候选版：
+3. 在已验证的提交上创建并推送标签。正式版本使用不含连字符的标签，例如：
 
    ```powershell
-   python scripts/check_version.py --tag v0.1.0-rc.1
-   git tag -a v0.1.0-rc.1 -m "RKA-3000 desktop release candidate 1"
-   git push origin v0.1.0-rc.1
+   python scripts/check_version.py --tag v0.1.0
+   git tag -a v0.1.0 -m "RKA-3000 desktop stable release"
+   git push origin v0.1.0
    ```
 
 4. 等待 `Release` 成功；核对 Release 关联提交、prerelease 标记、3 个资产及校验值。所有验证针对该标签重新运行，不能用其他提交的 artifact 代替。
 
-后续正式版建议 `v0.1.0`，修复候选版使用 `v0.1.0-rc.2` 等。正式版发布前仍需现场串口设备验收。版本标签只是发布入口，不代表代码已合并 main。
+修复候选版可继续使用 `v0.1.0-rc.2` 等带连字符的标签。正式版仍需现场串口设备验收；版本标签是发布入口，并不替代代码审查或硬件验收。
 
 ## 本地重复构建
 

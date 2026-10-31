@@ -24,7 +24,7 @@
 | [分层设计思路](docs/layered-design.md) | 六层职责、依赖方向、端口注入、新增协议步骤和测试对应关系 |
 | [分层与运行时细节](docs/architecture.md) | 扫描状态机、API 约定、进程收尾和扩展说明 |
 | [构建与发布](docs/releasing.md) | 版本同步、Windows 构建、发布资产和发布限制 |
-| [候选版说明](docs/release-notes.md) | 当前候选版的变更、安装和现场验收提示 |
+| [发行说明](docs/release-notes.md) | 当前发行版的变更、安装和现场验收提示 |
 
 ## 下载与运行
 
