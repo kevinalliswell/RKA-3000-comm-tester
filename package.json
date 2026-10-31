@@ -1,7 +1,7 @@
 {
   "name": "rka-3000-comm-tester",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "scripts": {
     "tauri": "tauri",
     "frontend:dev": "npm --prefix frontend run dev",

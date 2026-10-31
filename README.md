@@ -15,7 +15,21 @@
 
 完整依赖关系、任务状态与接口约定见 [分层设计](docs/architecture.md)。应用层通过注入的 `Probe`、端口枚举函数和 `ProfileStore` 使用基础设施；不导入 Qt、Tauri、HTTP 或串口库。
 
-## 安装与启动
+## 下载与运行
+
+从 [GitHub Releases](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases) 选择版本；`rc` 为预发布，需在现场设备上验收后再用于正式工作。
+
+| 资产 | 用途 |
+|---|---|
+| `*_windows-x64_setup.exe` | Windows 10/11 x64 当前用户安装器，带 Python 业务服务；缺少 WebView2 时在线下载安装 |
+| `*_windows-x64_portable.zip` | 解压全部文件，运行 `rka-3000-comm-tester.exe`；须已有 WebView2 Runtime |
+| `SHA256SUMS.txt` | 两个分发包的 SHA-256 校验值，可用 `Get-FileHash <文件> -Algorithm SHA256` 核对 |
+
+运行发行包无需安装 Python、Node.js、Rust。便携包必须保留同目录的 `rka-backend.exe`；“便携”仅指程序免安装，配置与日志仍放在用户目录。两种分发方式共用用户数据，升级/卸载不会主动删除配置和日志。
+
+当前构建未配置 Windows 代码签名，系统可能显示未知发布者。仓库公开不改变 [应用许可证](LICENSE)；随包保留第三方许可与依赖清单。离线机器需提前安装 [Microsoft WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。当前仅发布 Windows x64 资产。
+
+## 源码开发
 
 Windows 开发运行需要 Python ≥3.10、Node.js ≥20.19（推荐 24 LTS）、Rust MSVC，以及 **Visual Studio Build Tools 的“使用 C++ 的桌面开发”工作负载、Windows SDK、WebView2 Runtime**。只安装 Rust 无法提供 `link.exe`。
 
@@ -29,7 +43,7 @@ npm --prefix frontend ci
 
 也可在仓库根目录执行 `npm run tauri dev`。Tauri 使用仓库 `.venv`，可通过 `RKA_PYTHON` 指向其他已安装此 Python 包的解释器。
 
-当前支持从源码开发运行，以及在已配置 Python 环境的机器上运行桌面二进制。`npm run tauri build -- --no-bundle` 生成 release 程序；运行时设置 `RKA_PYTHON` 为已安装此项目的解释器绝对路径，或把 `.venv` 放在可执行文件旁。**本次不包含 Python 冻结和独立安装包**，`bundle.active` 暂时关闭。
+开发默认配置 `bundle.active=false`，无需预先冻结 Python。独立安装包使用单独的 `src-tauri/tauri.release.conf.json`，具体步骤见 [构建与发布](docs/releasing.md)。`RKA_PYTHON` 可显式覆盖随包后端，普通用户无需设置。
 
 macOS/Linux 同样使用 `.venv/bin/python`、`npm ci` 和 `npm run tauri dev`，另需安装 Tauri 对应系统的原生依赖。当前 CI 验证 Windows。
 
@@ -82,4 +96,6 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-Windows CI 同时执行上述检查及 Tauri debug 构建。协议实现来源、钉定版本与本地修正见 [VENDOR.md](src/rka_comm_tester/_vendor/VENDOR.md)。本项目与 [RKA-3000-desktop](https://github.com/kevinalliswell/RKA-3000-desktop) 独立管理。
+PR 和 main 推送触发 Windows CI：测试、类型检查、冻结 Python、Tauri release 编译、NSIS 打包、后端与桌面退出冒烟测试、安装/卸载验收，然后上传完整构建资产。推送 `v<版本号>` 标签复用同一流程，全部通过后才创建 GitHub Release；带 `-rc.N` 的标签自动标记预发布。发布流程不会合并 PR，详见 [构建与发布](docs/releasing.md)。
+
+协议实现来源、钉定版本与本地修正见 [VENDOR.md](src/rka_comm_tester/_vendor/VENDOR.md)。本项目与 [RKA-3000-desktop](https://github.com/kevinalliswell/RKA-3000-desktop) 独立管理。

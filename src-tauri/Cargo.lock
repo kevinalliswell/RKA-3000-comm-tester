@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "rka-3000-comm-tester"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "reqwest 0.12.28",
  "serde_json",

@@ -23,7 +23,7 @@ flowchart TD
 ## 各层约束
 
 - **表示层**：`App.svelte` 只绑定状态与 DOM；`session.svelte.ts` 管理请求、轮询与自动复查。串口参数是否合法由 Python 最终判定。HTML 表单提供基础输入约束，状态样式使用统一颜色变量。
-- **桌面层**：`main.rs` 启动已安装业务包的 Python，等待 stdout 就绪消息后创建业务连接。只转发白名单方法与路径，异步命令把阻塞 HTTP 放到工作线程。Rust 不解释扫描结果、不访问串口。
+- **桌面层**：`main.rs` 启动随包冻结的 Python 业务进程，开发时启动虚拟环境中的业务包，等待 stdout 就绪消息后创建业务连接。只转发白名单方法与路径，异步命令把阻塞 HTTP 放到工作线程。Rust 不解释扫描结果、不访问串口。
 - **接口层**：`api.py` 解析请求、验证访问令牌、映射 HTTP 状态并组装依赖；CLI 作为独立批处理入口复用相同领域配置与探测适配器。
 - **应用层**：`application.py` 定义任务、互斥、取消和配置用例。通过 `Probe`、`ProfileStore` 与枚举函数注入基础设施，可用假驱动离线测试。任务记录最多 50 条，应用退出后不保留任务历史。
 - **领域层**：`config.py` 和 `models.py` 无 HTTP、UI、串口依赖，表达校验约束与结果。
@@ -49,13 +49,19 @@ stateDiagram-v2
 
 ## 进程生命周期与边界
 
-1. Tauri 查找 `RKA_PYTHON`，开发时回退至仓库 `.venv`；release 查找可执行文件旁 `.venv`，最后回退系统 Python。
+1. 显式设置 `RKA_PYTHON` 时使用该解释器；否则优先运行主程序旁的 `rka-backend.exe`。开发时回退至仓库 `.venv`；未附 sidecar 的 release 回退至可执行文件旁 `.venv`，最后回退系统 Python。
 2. 创建随机令牌并通过环境变量传给 Python，监听 `127.0.0.1:0`，由系统分配空闲端口。
-3. Python 完成服务创建后向 stdout 输出 `{"port": number}`，诊断写 stderr/日志。Tauri 最多等 15 秒，启动失败清理子进程。
+3. Python 完成服务创建后向 stdout 输出 `{"port": number}`，诊断写 stderr/日志。Tauri 最多等 30 秒，包含冻结程序首次解压启动时间；启动失败清理子进程。
 4. 页面通过 Tauri IPC 请求白名单接口，令牌保留在 Rust。Python 不开放跨域请求，并要求每个业务请求带令牌。
 5. 退出时 Tauri 发送私有 shutdown 请求；Python 关闭服务、取消扫描并等待驱动清理。Tauri 等待进程结束，90 秒仍未退出才强制回收并输出诊断。
 
-正常关闭走上述收尾流程；进程崩溃、断电或被外部强制终止无法保证 O0 发送成功。当前不是独立安装包；冻结 Python sidecar 与安装器属于后续交付步骤，不能把本机调试成功等同于可分发安装包。
+正常关闭走上述收尾流程；进程崩溃、断电或被外部强制终止无法保证 O0 发送成功。冻结服务仍使用相同 API、应用与领域模块，打包不复制另一套业务逻辑。PyInstaller onefile 的引导进程和实际服务进程由正常 shutdown 一起退出；CI 检查窗口退出后不存在遗留业务进程。
+
+## 构建与交付边界
+
+`scripts/backend_entry.py` 只进入 API 适配层。PyInstaller 收集协议模块，排除 Qt；`build_backend.py` 生成带 Rust target 后缀的 sidecar。Tauri 发布配置通过 `externalBin` 将它安装为 `rka-backend.exe`，附带依赖许可；默认开发配置保持无冻结依赖。
+
+`stage_release.py` 将主程序、sidecar、许可与使用说明打包为 ZIP，并复制 NSIS 安装器、生成 SHA-256 校验文件。发布工作流调用同一个 Windows 检查/构建工作流；只有测试与安装/卸载检查全部成功，拥有 `contents: write` 的独立发布任务才上传 Release。分层依赖和构建工具互不混入运行时业务。详见 [发布约定](releasing.md)。
 
 ## 本地 JSON 接口
 
@@ -76,6 +82,6 @@ stateDiagram-v2
 
 ## 验证与扩展
 
-Python 测试用注入的假驱动覆盖参数、协议、任务和 HTTP 边界，不访问真实串口。Svelte 类型检查和构建检查表示层；Windows CI 检查 Rust 并构建桌面二进制。浏览器联调通过 Vite 的同源代理，不能替代桌面进程生命周期验收；真机协议、接线与时间参数仍需现场确认。
+Python 测试用注入的假驱动覆盖参数、协议、任务和 HTTP 边界，不访问真实串口。Svelte 类型检查和构建检查表示层；Windows CI 编译 Rust、打包、运行冻结后端和便携/安装版桌面生命周期检查。浏览器联调通过 Vite 的同源代理；CI 桌面冒烟只覆盖窗口、后端与退出收尾，真机协议、接线、界面完整交互与时间参数仍需现场确认。
 
 新增设备时：扩展领域配置，新增 `scanner.py` 探测适配器及测试，再增加表单选项；保持 I/O 有界、取消检查与 finally 清理。无需新增 Rust 业务逻辑。

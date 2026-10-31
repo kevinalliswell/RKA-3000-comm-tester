@@ -1,12 +1,27 @@
 name: Checks
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -23,17 +38,42 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: python -m pip install -e ".[dev,legacy-ui]"
+      - name: Check manifest and release tag versions
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            python scripts/check_version.py --tag $env:GITHUB_REF_NAME
+          } else {
+            python scripts/check_version.py
+          }
+      - run: python -m pip install -r requirements/build.txt -e ".[dev,legacy-ui]"
       - run: python -m pytest -q
       - run: python -m ruff check .
       - run: npm ci
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend run check
-      - run: npm --prefix frontend run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - run: cargo check --locked --manifest-path src-tauri/Cargo.toml
-      - run: npm run tauri build -- --debug --no-bundle
+      - name: Freeze Python backend
+        run: python scripts/build_backend.py
+      - name: Verify frozen backend without serial I/O
+        run: python scripts/smoke_backend.py src-tauri/binaries/rka-backend-x86_64-pc-windows-msvc.exe
+      - name: Collect dependency notices
+        run: python scripts/collect_notices.py
+      - name: Build Windows desktop and NSIS installer
+        run: npm run tauri build -- --ci --config src-tauri/tauri.release.conf.json -- --locked
+      - name: Stage portable ZIP, installer and checksums
+        run: python scripts/stage_release.py
+      - name: Verify portable desktop lifecycle
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build/portable -Recurse -Filter rka-3000-comm-tester.exe
+          ./scripts/smoke_desktop.ps1 -Executable $exe.FullName
+      - name: Verify install, installed desktop and uninstall
+        shell: pwsh
+        run: ./scripts/smoke_installer.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: rka-comm-tester-windows-debug
-          path: src-tauri/target/debug/rka-3000-comm-tester.exe
+          name: rka-comm-tester-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14

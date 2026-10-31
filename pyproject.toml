@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rka-comm-tester"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 description = "Read-only serial communication tester for TAIE, Azbil MFC and balances"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,9 @@ testpaths = ["tests"]
 line-length = 100
 target-version = "py310"
 exclude = ["src/rka_comm_tester/_vendor"]
+
+[tool.ruff.per-file-target-version]
+"scripts/*.py" = "py312"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
