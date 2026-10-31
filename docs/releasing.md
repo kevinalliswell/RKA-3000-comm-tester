@@ -13,7 +13,7 @@
 所有版本必须相同：根及 frontend 的 `package.json` 和 `package-lock.json`、`pyproject.toml`、Python `__version__`、`src-tauri/Cargo.toml` / `Cargo.lock` / `tauri.conf.json`。`scripts/check_version.py` 防止版本遗漏，并校验标签恰为 `v<版本>`。
 
 1. 更新上述版本、`CHANGELOG.md` 与 `docs/release-notes.md`，提交并推送。
-2. 等待对应 PR 或手动 `Checks` 成功，检查 artifact。当前迁移分支可直接发布预发布，无需合并 PR。
+2. 通过 PR 完成审查并合并到 `main`，等待对应 `Checks` 成功，检查 artifact。候选版可以从已经验证的分支提交发布；正式版使用 `main` 上已验证的提交。
 3. 在已验证的提交上创建并推送标签。正式版本使用不含连字符的标签，例如：
 
    ```powershell
@@ -24,7 +24,7 @@
 
 4. 等待 `Release` 成功；核对 Release 关联提交、prerelease 标记、3 个资产及校验值。所有验证针对该标签重新运行，不能用其他提交的 artifact 代替。
 
-修复候选版可继续使用 `v0.1.0-rc.2` 等带连字符的标签。正式版仍需现场串口设备验收；版本标签是发布入口，并不替代代码审查或硬件验收。
+下一修复版本可使用 `v0.1.1-rc.1` 等带连字符的候选标签，验收后发布 `v0.1.1`。正式版仍需现场串口设备验收；版本标签是发布入口，并不替代代码审查或硬件验收。文档更正可以在后续 PR 更新，不移动已发布标签；运行代码或资产需要变化时发布新版本。
 
 ## 本地重复构建
 

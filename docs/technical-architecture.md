@@ -6,17 +6,18 @@ RKA-3000 通信测试工具采用 Tauri 2 + Svelte 5/TypeScript 的桌面窗口�
 
 ```mermaid
 flowchart LR
-    UI[Svelte 5 / TypeScript\n表示与状态] --> IPC[Tauri IPC\n白名单命令]
-    IPC --> Shell[Rust Tauri shell\n窗口与进程生命周期]
-    Shell -->|127.0.0.1:动态端口\n随机 Bearer token| API[Python API 适配层]
-    API --> App[应用服务\n扫描任务/取消/配置]
-    App --> Domain[领域模型\nScanConfig/ScanResult]
-    App --> Ports[注入接口\nProbe/ProfileStore/端口枚举]
-    Ports --> Scanner[串口探测适配器]
+    UI["Svelte 5 / TypeScript<br/>表示与状态"] --> IPC["Tauri IPC<br/>白名单命令"]
+    IPC --> Shell["Rust Tauri shell<br/>窗口与进程生命周期"]
+    Shell -->|"127.0.0.1:动态端口 / 随机 Bearer token"| API[Python API 适配层]
+    API --> App["应用服务<br/>扫描任务/取消/配置"]
+    App --> Domain["领域模型<br/>ScanConfig/ScanResult"]
+    App --> Ports["注入接口<br/>Probe/ProfileStore/端口枚举"]
+    Scanner[串口探测适配器] -.实现 Probe.-> Ports
     Scanner --> TAIE[TAIE Modbus RTU]
     Scanner --> Azbil[Azbil CPL]
     Scanner --> Balance[GS-CPA / 龙腾 ASCII]
-    App --> Store[用户配置与轮转日志]
+    Store[配置文件适配器] -.实现 ProfileStore.-> Ports
+    API --> Logs[轮转日志初始化]
 ```
 
 源码映射如下：
@@ -39,8 +40,8 @@ sequenceDiagram
     participant S as Svelte
     T->>T: 生成随机 token
     T->>P: 启动并注入 RKA_API_TOKEN、--port 0
-    P-->>T: stdout: {"port": <n>}
-    T->>T: 只接受 loopback 端口并建立桌面会话
+    P-->>T: stdout 返回监听端口 JSON
+    T->>T: 校验端口范围并连接 127.0.0.1
     S->>T: invoke(白名单 API)
     T->>P: loopback HTTP + Bearer token
     P->>P: API -> 应用服务 -> 探测适配器
@@ -48,9 +49,9 @@ sequenceDiagram
     T-->>S: 返回类型化数据
 ```
 
-启动时 Python 监听 `127.0.0.1:0`，由操作系统分配空闲端口，再通过 stdout 输出机器可读握手。Rust 最多等待 30 秒，启动失败会读取 stderr、终止子进程并把诊断留在日志中。开发环境可使用仓库 `.venv`；发布包优先使用旁路的 `rka-backend.exe`。
+启动时 Python 监听 `127.0.0.1:0`，由操作系统分配空闲端口，再通过 stdout 输出机器可读握手。Rust 最多等待 30 秒，就绪握手失败时终止并等待子进程退出。后端 stderr 继承自桌面进程；Python 日志初始化成功后的诊断另写用户日志。CI 冒烟脚本单独捕获桌面 stdout/stderr，普通发布窗口没有持久化 Rust 启动日志。开发环境可使用仓库 `.venv`；发布包优先使用主程序旁的 `rka-backend.exe`。
 
-桌面 API 只转发固定的健康检查、端口枚举、配置、扫描、取消、日志和关闭操作。token 不进入前端 bundle；Python API 拒绝非 loopback 请求、缺失 token 和超过 1 MB 的 JSON 请求体。
+页面通过桌面白名单访问健康检查、端口枚举、配置、扫描、取消和日志；shutdown 仅由 Rust 在退出时调用，不向页面开放。token 不进入前端 bundle；Python API 只允许绑定 `127.0.0.1`，拒绝缺失或错误的 token，并限制配置/扫描 JSON 请求体不超过 1 MB。
 
 ## 扫描和关闭生命周期
 
@@ -78,13 +79,14 @@ flowchart TD
     PR[Pull Request / main push] --> Checks[Windows Checks]
     Checks --> Unit[Python tests + Ruff]
     Checks --> Frontend[Svelte check/build]
-    Checks --> Rust[Rust fmt/check]
+    Checks --> Rust[Rust fmt + Tauri 编译]
     Checks --> Freeze[PyInstaller sidecar]
     Checks --> Smoke[后端/桌面/安装卸载冒烟]
-    Tag[v<version> tag] --> Release[Release workflow]
+    Tag["v版本号 tag"] --> Release[Release workflow]
     Release --> Checks
     Checks --> Assets[NSIS + portable ZIP + SHA256]
-    Assets --> GitHub[GitHub Release]
+    Assets --> Publish[Release 发布任务校验 SHA256]
+    Publish --> GitHub[GitHub Release]
 ```
 
 检查工作流只读仓库内容并上传构建 artifact；发布工作流在标签验证成功后使用 `contents: write` 创建 Release。带 `-rc.N` 的标签自动标记为 prerelease，正式标签例如 `v0.1.0`。目前未配置 Authenticode，SHA-256 只验证下载完整性，不能代替代码签名。
