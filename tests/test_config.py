@@ -1,6 +1,7 @@
 import pytest
 
 from rka_comm_tester.config import ScanConfig
+from rka_comm_tester.profiles import FileProfileStore
 
 
 def test_scan_config_allows_independent_serial_parameters():
@@ -15,8 +16,10 @@ def test_scan_config_allows_independent_serial_parameters():
 def test_scan_config_round_trip(tmp_path):
     cfg = ScanConfig(device="azbil", port="COM8", parity="E", start_address=2, end_address=4)
     path = tmp_path / "profile.json"
-    cfg.save(path)
-    assert ScanConfig.load(path) == cfg
+    store = FileProfileStore(path)
+    assert store.load() is None
+    store.save(cfg)
+    assert store.load() == cfg
 
 
 @pytest.mark.parametrize("changes", [

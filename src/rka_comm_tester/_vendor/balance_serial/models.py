@@ -25,6 +25,7 @@ class PortSettings:
             "parity": self.parity,
             "stopbits": self.stopbits,
             "timeout": self.timeout,
+            "write_timeout": self.timeout,
             "xonxoff": self.xonxoff,
         }
 

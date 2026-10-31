@@ -6,4 +6,27 @@ if not exist "%~dp0.venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-"%~dp0.venv\Scripts\python.exe" -m rka_comm_tester
+if not exist "%~dp0frontend\node_modules" (
+  echo Installing frontend dependencies...
+  pushd "%~dp0frontend"
+  call npm ci
+  if errorlevel 1 (
+    popd
+    exit /b 1
+  )
+  popd
+)
+if not exist "%~dp0node_modules" (
+  pushd "%~dp0"
+  call npm ci
+  if errorlevel 1 (
+    popd
+    exit /b 1
+  )
+  popd
+)
+pushd "%~dp0"
+call npm run tauri dev
+set "RKA_EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %RKA_EXIT_CODE%

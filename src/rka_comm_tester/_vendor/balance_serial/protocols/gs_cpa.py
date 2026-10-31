@@ -23,6 +23,11 @@ class GSCpaProtocol(BalanceProtocol):
             return (b"O1\r\n",)
         return ()
 
+    def shutdown_commands(self) -> tuple[bytes, ...]:
+        if self.auto_continuous_output:
+            return (b"O0\r\n",)
+        return ()
+
     def tare_command(self) -> bytes:
         return b"T \r\n"
 

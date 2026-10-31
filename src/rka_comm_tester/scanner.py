@@ -3,37 +3,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from contextlib import closing
+from dataclasses import asdict
 from threading import Event
 from typing import Callable, Iterator
 
 from serial.tools import list_ports
 
 from .config import ScanConfig
+from .models import PortInfo, ScanResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PortInfo:
-    device: str
-    description: str
-    hwid: str
-
-
-@dataclass(frozen=True)
-class ScanResult:
-    device: str
-    port: str
-    address: int | None
-    status: str
-    values: dict = field(default_factory=dict)
-    detail: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 def available_ports() -> list[PortInfo]:
@@ -53,13 +33,14 @@ def scan(
     logger.info("scan start: %s", cfg.to_dict())
     probe = {"taie": _scan_taie, "azbil": _scan_azbil, "balance": _scan_balance}[cfg.device]
     try:
-        for result in probe(cfg, stop):
-            if stop.is_set():
-                break
-            logger.info("scan result: %s", result.to_dict())
-            if on_result:
-                on_result(result)
-            yield result
+        with closing(probe(cfg, stop)) as results:
+            for result in results:
+                if stop.is_set():
+                    break
+                logger.info("scan result: %s", result.to_dict())
+                if on_result:
+                    on_result(result)
+                yield result
     except Exception as exc:  # port open and unexpected driver errors become visible results
         result = ScanResult(cfg.device, cfg.port, None, "error", detail=f"{type(exc).__name__}: {exc}")
         logger.exception("scan failed")
@@ -101,7 +82,16 @@ def _scan_taie(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
                 sv_raw = client.read_holding_registers(0x0000, 1)[0]
                 values.update(sv_raw=sv_raw, sv_c=decode_tenths_signed(sv_raw))
             except Exception as exc:
-                yield ScanResult(cfg.device, cfg.port, address, "degraded", values, f"PV 有效，SV 读取失败: {exc}")
+                # PV is the required liveness signal; SV is useful diagnostics but
+                # some controllers do not expose it consistently.
+                yield ScanResult(
+                    cfg.device,
+                    cfg.port,
+                    address,
+                    "online",
+                    values,
+                    f"PV 有效；SV 读取失败，仅完成基础在线判定: {exc}",
+                )
             else:
                 yield ScanResult(cfg.device, cfg.port, address, "online", values, "PV/SV 有效")
 
@@ -134,10 +124,14 @@ def _scan_azbil(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
                 scale = read_flow_scale(bus, address)
                 if not 1 <= scale.full_scale_raw <= 0xFFFF or not 1 <= scale.decimal_position <= 6 or scale.flow_unit_code not in (0, 1):
                     raise ValueError("设备返回的量程元数据无效")
+                if not 0 <= pv_raw <= scale.full_scale_raw:
+                    raise ValueError(f"PV 原始值 {pv_raw} 超出量程 0..{scale.full_scale_raw}")
+                if not 0 <= sp_raw <= scale.full_scale_raw:
+                    raise ValueError(f"SP 原始值 {sp_raw} 超出量程 0..{scale.full_scale_raw}")
                 values.update(sp_raw=sp_raw, pv_lpm=round(scale.raw_to_flow(pv_raw), 4),
                               sp_lpm=round(scale.raw_to_flow(sp_raw), 4), scale=scale.to_dict())
             except Exception as exc:
-                yield ScanResult(cfg.device, cfg.port, address, "degraded", values, f"PV 响应有效，SP/量程读取失败: {exc}")
+                yield ScanResult(cfg.device, cfg.port, address, "degraded", values, f"PV 已响应，SP/量程校验失败: {exc}")
             else:
                 yield ScanResult(cfg.device, cfg.port, address, "online", values, "PV/SP 与量程有效")
 
@@ -152,10 +146,12 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
     settings = PortSettings(cfg.port, baudrate=cfg.baudrate, parity=cfg.parity,
                             stopbits=cfg.stopbits, timeout=cfg.timeout_s)
     client = BalanceClient(settings, protocol)
+    output_started = False
     try:
         client.open()
         if cfg.balance_start_output and cfg.balance_protocol == "gs_cpa":
             client.initialize_device()
+            output_started = True
             logger.info("balance startup command sent: O1")
         observed: list[str] = []
         for _ in range(cfg.balance_lines):
@@ -176,4 +172,10 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         detail = "未收到稳定称重帧" if observed else "未收到天平数据"
         yield ScanResult(cfg.device, cfg.port, None, status, {"observed": observed[-5:]}, detail)
     finally:
+        if output_started:
+            try:
+                client.shutdown_device()
+                logger.info("balance shutdown command sent: O0")
+            except Exception:
+                logger.exception("balance shutdown command failed")
         client.close()

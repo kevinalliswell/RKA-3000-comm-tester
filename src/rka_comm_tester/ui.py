@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import ScanConfig
+from .profiles import FileProfileStore
 from .scanner import ScanResult, available_ports, scan
 
 logger = logging.getLogger(__name__)
@@ -43,12 +44,14 @@ class ScanWorker(QThread):
         super().__init__()
         self.cfg = cfg
         self.cancelled = Event()
+        self.was_cancelled = False
 
     def run(self) -> None:
         for result in scan(self.cfg, self.cancelled):
             self.result_ready.emit(result)
 
     def cancel(self) -> None:
+        self.was_cancelled = True
         self.cancelled.set()
 
 
@@ -196,15 +199,21 @@ class MainWindow(QMainWindow):
         layout.addLayout(log_row)
 
         self.setStyleSheet("""
-            QMainWindow { background: #f5f7fa; color: #1f2937; }
-            QGroupBox { border: 1px solid #d9e0e8; border-radius: 6px; margin-top: 10px; padding: 10px; background: white; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; font-weight: 600; }
+            QMainWindow, QWidget { background: #f5f7fa; color: #1f2937; }
+            QLabel { color: #334155; }
+            QGroupBox { border: 1px solid #cbd5e1; border-radius: 6px; margin-top: 10px; padding: 10px; background: #ffffff; color: #1f2937; }
+            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; font-weight: 600; color: #1f2937; }
             QLabel#title { font-size: 22px; font-weight: 700; color: #14283f; }
-            QPushButton { padding: 6px 12px; border: 1px solid #c5ced9; border-radius: 4px; background: white; }
-            QPushButton:hover { background: #e9f1fb; }
+            QPushButton { padding: 6px 12px; border: 1px solid #b8c4d1; border-radius: 4px; background: #ffffff; color: #1f2937; }
+            QPushButton:hover { background: #e9f1fb; border-color: #8aa9c7; }
             QPushButton#primary { background: #1769aa; color: white; border-color: #1769aa; font-weight: 600; }
             QPushButton#primary:hover { background: #145b93; }
-            QTableWidget { background: white; border: 1px solid #d9e0e8; }
+            QCheckBox { color: #334155; }
+            QComboBox, QSpinBox, QDoubleSpinBox { background: #ffffff; color: #1f2937; border: 1px solid #b8c4d1; border-radius: 4px; padding: 4px 6px; }
+            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #1769aa; }
+            QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QCheckBox:disabled, QPushButton:disabled { color: #94a3b8; background: #eef2f6; border-color: #d5dde6; }
+            QTableWidget { background: #ffffff; color: #1f2937; border: 1px solid #cbd5e1; gridline-color: #e2e8f0; }
+            QHeaderView::section { background: #3f4b59; color: #ffffff; border: 0; padding: 5px; font-weight: 600; }
         """)
         self.device.currentIndexChanged.connect(self._device_changed)
         self._device_changed()
@@ -307,6 +316,9 @@ class MainWindow(QMainWindow):
         if self._closing:
             self.close()
             return
+        if self.worker and self.worker.was_cancelled:
+            self.status_label.setText("扫描已停止，结果不完整。")
+            return
         if self.auto_check.isChecked():
             self.status_label.setText(f"扫描完成，{self.auto_interval.value()} 秒后复查。")
             self._auto_timer.start(self.auto_interval.value() * 1000)
@@ -321,7 +333,7 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getSaveFileName(self, "保存配置", "config.local.json", "JSON (*.json)")
         if path:
-            cfg.save(path)
+            FileProfileStore(path).save(cfg)
             logger.info("config saved: %s", path)
 
     def load_config(self) -> None:
@@ -329,7 +341,9 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            cfg = ScanConfig.load(path)
+            cfg = FileProfileStore(path).load()
+            if cfg is None:
+                raise ValueError("配置文件不存在")
         except (OSError, ValueError, TypeError, KeyError) as exc:
             QMessageBox.warning(self, "配置文件无效", str(exc))
             return

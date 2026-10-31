@@ -1,0 +1,18 @@
+[package]
+name = "rka-3000-comm-tester"
+version = "0.1.0-rc.1"
+description = "RKA-3000 communication tester desktop shell"
+authors = ["Kevin Alliswell"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.8", features = [] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
