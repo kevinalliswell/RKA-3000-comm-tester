@@ -38,6 +38,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - name: Check manifest and release tag versions
         shell: pwsh
         run: |
@@ -77,3 +78,13 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
           retention-days: 14
+      - name: Save failed package for diagnosis
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rka-windows-failure
+          path: |
+            dist/release/*
+            build/portable/**
+          if-no-files-found: ignore
+          retention-days: 3
