@@ -161,3 +161,33 @@ def test_balance_scan_treats_unstable_as_degraded_and_o1_as_opt_in(monkeypatch):
     assert initialized == [True]
     assert shutdowns == [True]
     assert GSCpaProtocol(auto_continuous_output=False).startup_commands() == ()
+
+
+def test_cancel_closes_balance_probe_before_scan_returns(monkeypatch):
+    from rka_comm_tester._vendor import balance_serial
+
+    stop = Event()
+    cleanup = []
+
+    class FakeClient:
+        def __init__(self, settings, protocol):
+            self.protocol = protocol
+
+        def open(self): ...
+
+        def initialize_device(self): ...
+
+        def read_message(self):
+            stop.set()  # Cancellation arrives during the serial read.
+            return self.protocol.parse_message("+0277.19 G S")
+
+        def shutdown_device(self):
+            cleanup.append("O0")
+
+        def close(self):
+            cleanup.append("close")
+
+    monkeypatch.setattr(balance_serial, "BalanceClient", FakeClient)
+    config = ScanConfig(device="balance", port="unused", balance_start_output=True)
+    assert list(scan(config, stop)) == []
+    assert cleanup == ["O0", "close"]

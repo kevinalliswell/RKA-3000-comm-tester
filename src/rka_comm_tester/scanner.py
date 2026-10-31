@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import closing
 from dataclasses import asdict
 from threading import Event
 from typing import Callable, Iterator
@@ -32,13 +33,14 @@ def scan(
     logger.info("scan start: %s", cfg.to_dict())
     probe = {"taie": _scan_taie, "azbil": _scan_azbil, "balance": _scan_balance}[cfg.device]
     try:
-        for result in probe(cfg, stop):
-            if stop.is_set():
-                break
-            logger.info("scan result: %s", result.to_dict())
-            if on_result:
-                on_result(result)
-            yield result
+        with closing(probe(cfg, stop)) as results:
+            for result in results:
+                if stop.is_set():
+                    break
+                logger.info("scan result: %s", result.to_dict())
+                if on_result:
+                    on_result(result)
+                yield result
     except Exception as exc:  # port open and unexpected driver errors become visible results
         result = ScanResult(cfg.device, cfg.port, None, "error", detail=f"{type(exc).__name__}: {exc}")
         logger.exception("scan failed")
