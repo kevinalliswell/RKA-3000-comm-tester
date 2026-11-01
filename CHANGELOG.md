@@ -4,6 +4,8 @@
 
 - Add an operator-confirmed balance tare test (`POST /api/tare`): one tare command, then a
   cancellable wait for a stable zero within a configurable timeout and tolerance.
+- Bound tare confirmation reads by the remaining deadline, reject late zero readings,
+  and report unknown responses as degraded rather than offline.
 - Keep the window open with the failure reason when the backend cannot start, log desktop
   startup failures to `desktop.log`, and show a Windows error box if no window can be created.
 - Shut the backend down when the desktop process exits unexpectedly (stdin EOF).

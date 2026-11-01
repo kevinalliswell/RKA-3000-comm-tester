@@ -22,6 +22,9 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   an ACK or an unstable zero.
 - `balance_serial/client.py`: `reset_input_buffer()` lets the tare test discard frames
   received before the tare command.
+- `balance_serial/client.py`: optional monotonic deadlines on line/message reads cap
+  each byte read by the remaining time and restore the serial timeout on every exit,
+  so continuous data without a newline cannot prolong tare confirmation.
 - `balance_serial/models.py`: serial writes use the configured timeout so O1/O0 do not
   wait indefinitely for an unavailable output buffer.
 

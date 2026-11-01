@@ -247,10 +247,15 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         while time.monotonic() < deadline:
             if stop.is_set():
                 return
-            message = client.read_message()
+            message = client.read_message(deadline=deadline)
+            if message is not None:
+                observed.append(message.raw)
+            # A read (or driver scheduling) may finish at/after the deadline.
+            # Keep any response for diagnostics, but never confirm a late zero.
+            if time.monotonic() >= deadline:
+                break
             if message is None:
                 continue
-            observed.append(message.raw)
             if message.kind == "ack":
                 values["ack"] = message.code
             elif message.kind == "error":
@@ -270,6 +275,8 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             status, detail = "degraded", f"已发送去皮命令，但 {cfg.tare_timeout_s:g} 秒内未读到稳定零点"
         elif "ack" in values:
             status, detail = "degraded", "天平已应答去皮命令，但未收到称重帧；可启用 O1 连续输出后重试"
+        elif observed:
+            status, detail = "degraded", f"天平已响应，但 {cfg.tare_timeout_s:g} 秒内未收到可确认的稳定零点"
         else:
             status, detail = "offline", "已发送去皮命令，但未收到天平数据"
         yield ScanResult(cfg.device, cfg.port, None, status, values, detail)

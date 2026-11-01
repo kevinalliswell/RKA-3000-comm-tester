@@ -122,16 +122,35 @@ class BalanceClient:
             observed_messages=tuple(observed_messages),
         )
 
-    def read_raw_line(self) -> str | None:
+    def read_raw_line(self, *, deadline: float | None = None) -> str | None:
+        """Read a line, optionally bounded by an absolute monotonic deadline."""
         self._ensure_open()
         assert self._serial is not None
-        raw_bytes = self._serial.readline()
+        if deadline is None:
+            raw_bytes = self._serial.readline()
+        else:
+            # readline() can restart its timeout for every byte. Recompute the
+            # remaining budget even for a continuous stream without a newline.
+            original_timeout = self._serial.timeout
+            raw_bytes = bytearray()
+            try:
+                while (remaining := deadline - time.monotonic()) > 0:
+                    self._serial.timeout = (remaining if original_timeout is None
+                                            else min(original_timeout, remaining))
+                    chunk = self._serial.read(1)
+                    if not chunk:
+                        break
+                    raw_bytes.extend(chunk)
+                    if chunk == b"\n":
+                        break
+            finally:
+                self._serial.timeout = original_timeout
         if not raw_bytes:
             return None
         return raw_bytes.decode(self.encoding, errors=self.errors).strip()
 
-    def read_message(self) -> BalanceMessage | None:
-        raw = self.read_raw_line()
+    def read_message(self, *, deadline: float | None = None) -> BalanceMessage | None:
+        raw = self.read_raw_line(deadline=deadline)
         if raw is None:
             return None
         return self.protocol.parse_message(raw)
