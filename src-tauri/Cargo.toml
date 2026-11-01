@@ -1,6 +1,6 @@
 [package]
 name = "rka-3000-comm-tester"
-version = "0.1.0"
+version = "0.1.1"
 description = "RKA-3000 communication tester desktop shell"
 authors = ["Kevin Alliswell"]
 edition = "2021"

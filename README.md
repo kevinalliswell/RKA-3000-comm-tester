@@ -28,7 +28,7 @@
 
 ## 下载与运行
 
-从 [GitHub Releases](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases) 选择版本；带 `rc` 的版本是预发布版本，正式版本也仍需在现场设备上验收后再用于生产工作。
+当前正式版为 [v0.1.1](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases/tag/v0.1.1)，新增天平去皮测试并改进后端启动与退出。历史版本见 [GitHub Releases](https://github.com/kevinalliswell/RKA-3000-comm-tester/releases)；带 `rc` 的版本是预发布版本，正式版本也仍需在现场设备上验收后再用于生产工作。
 
 | 资产 | 用途 |
 |---|---|
