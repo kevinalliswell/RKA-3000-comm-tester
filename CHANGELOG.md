@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.1 — 2026-11-01
+
 - Add an operator-confirmed balance tare test (`POST /api/tare`): one tare command, then a
   cancellable wait for a stable zero within a configurable timeout and tolerance.
 - Bound tare confirmation reads by the remaining deadline, reject late zero readings,

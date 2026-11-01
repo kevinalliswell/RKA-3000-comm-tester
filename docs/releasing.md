@@ -17,14 +17,14 @@
 3. 在已验证的提交上创建并推送标签。正式版本使用不含连字符的标签，例如：
 
    ```powershell
-   python scripts/check_version.py --tag v0.1.0
-   git tag -a v0.1.0 -m "RKA-3000 desktop stable release"
-   git push origin v0.1.0
+   python scripts/check_version.py --tag v0.1.1
+   git tag -a v0.1.1 -m "RKA-3000 desktop v0.1.1"
+   git push origin v0.1.1
    ```
 
 4. 等待 `Release` 成功；核对 Release 关联提交、prerelease 标记、3 个资产及校验值。所有验证针对该标签重新运行，不能用其他提交的 artifact 代替。
 
-下一修复版本可使用 `v0.1.1-rc.1` 等带连字符的候选标签，验收后发布 `v0.1.1`。正式版仍需现场串口设备验收；版本标签是发布入口，并不替代代码审查或硬件验收。文档更正可以在后续 PR 更新，不移动已发布标签；运行代码或资产需要变化时发布新版本。
+后续修复版本可使用 `v0.1.2-rc.1` 等带连字符的候选标签，验收后发布 `v0.1.2`。正式版仍需现场串口设备验收；版本标签是发布入口，并不替代代码审查或硬件验收。文档更正可以在后续 PR 更新，不移动已发布标签；运行代码或资产需要变化时发布新版本。
 
 ## 本地重复构建
 
