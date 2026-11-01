@@ -59,6 +59,11 @@ class BalanceClient:
         self._serial.write(data)
         self._serial.flush()
 
+    def reset_input_buffer(self) -> None:
+        self._ensure_open()
+        assert self._serial is not None
+        self._serial.reset_input_buffer()
+
     def send_text(self, data: str) -> None:
         self.send_bytes(data.encode(self.encoding))
 

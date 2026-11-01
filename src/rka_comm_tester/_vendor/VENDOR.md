@@ -20,11 +20,16 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   frames; Longteng `ST` frames are marked stable.
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
   an ACK or an unstable zero.
+- `balance_serial/client.py`: `reset_input_buffer()` lets the tare test discard frames
+  received before the tare command.
 - `balance_serial/models.py`: serial writes use the configured timeout so O1/O0 do not
   wait indefinitely for an unavailable output buffer.
 
-This tester calls only read/probe methods. It requires live MFC scale metadata before
-displaying engineering flow units and exposes no setpoint or tare action in its UI/CLI.
+Scans call only read/probe methods. It requires live MFC scale metadata before
+displaying engineering flow units and exposes no setpoint or register write. The only
+device-changing action is the balance tare test, started explicitly and confirmed by the
+operator; it sends one tare command and implements its own cancellable confirmation loop
+instead of `send_tare_and_wait()`.
 Copies were extracted from RKA-3000-desktop commit d2635df. The same-owner upstream
 repositories and exact pinned revisions are listed below.
 

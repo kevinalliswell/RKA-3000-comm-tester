@@ -11,7 +11,11 @@
     queued: '等待扫描', running: '扫描中', completed: '已完成', cancelled: '已停止',
     online: '在线', offline: '无响应', degraded: '响应不完整', error: '错误',
   };
+  const tareStatuses: Record<string, string> = { queued: '等待去皮', running: '去皮测试中' };
   const isBalance = $derived(session.config.device === 'balance');
+  const jobStatus = $derived(session.job
+    ? (session.job.operation === 'tare' && tareStatuses[session.job.status]) || statuses[session.job.status]
+    : '待机');
   const maxAddress = $derived(session.config.device === 'azbil' ? 127 : 247);
   const onlineCount = $derived(session.job?.results.filter((result) => result.status === 'online').length ?? 0);
   let importInput: HTMLInputElement;
@@ -20,6 +24,11 @@
     void session.initialize();
     return () => session.dispose();
   });
+
+  function confirmTare() {
+    const message = '去皮会把天平当前读数清零（改变天平零点）。\n请确认秤盘为空或只放置需要扣除的容器。\n\n继续发送去皮命令？';
+    if (window.confirm(message)) void session.beginTare();
+  }
 
   function valueSummary(result: ScanResult) {
     return Object.entries(result.values).map(([key, value]) =>
@@ -42,7 +51,7 @@
 
   <section class="workspace">
     <aside class="control-panel">
-      <div class="panel-heading"><div><div class="eyebrow">SCAN PROFILE</div><h2>扫描参数</h2></div><span class="layer-tag">只读诊断</span></div>
+      <div class="panel-heading"><div><div class="eyebrow">SCAN PROFILE</div><h2>扫描参数</h2></div><span class="layer-tag">{isBalance ? '诊断 · 去皮需确认' : '只读诊断'}</span></div>
       <form onsubmit={(event) => { event.preventDefault(); void session.beginScan(); }}>
         <fieldset disabled={session.active}>
           <label class="field"><span>设备协议</span>
@@ -73,12 +82,18 @@
               <label class="field"><span>读取帧数</span><input type="number" bind:value={session.config.balance_lines} min="1" max="100" step="1" required /></label>
             </div>
             <label class="toggle-row"><input type="checkbox" bind:checked={session.config.balance_start_output} disabled={session.config.balance_protocol !== 'gs_cpa'} /><span>发送 O1 启动连续输出（结束时发送 O0）</span></label>
+            <div class="section-divider"><span>去皮测试</span><span class="hint">发送去皮命令并等待稳定零点</span></div>
+            <div class="field-grid two">
+              <label class="field"><span>等待 / 秒</span><input type="number" bind:value={session.config.tare_timeout_s} min="1" max="30" step="0.5" required /></label>
+              <label class="field"><span>零点容差 / g</span><input type="number" bind:value={session.config.tare_zero_tolerance_g} min="0.001" max="10" step="0.001" required /></label>
+            </div>
           {/if}
         </fieldset>
         <div class="actions">
           <button type="submit" class="button primary" disabled={!session.connected || session.active}>开始扫描</button>
           <button type="button" class="button secondary" onclick={() => session.stopScan()} disabled={!session.active || session.submitting || session.cancelling}>{session.cancelling ? '停止中…' : '停止'}</button>
           <button type="button" class="button quiet" onclick={() => session.refreshPorts()} disabled={!session.connected || session.active}>刷新串口</button>
+          {#if isBalance}<button type="button" class="button tare" onclick={confirmTare} disabled={!session.connected || session.active}>去皮测试</button>{/if}
         </div>
       </form>
       <div class="auto-row"><label><input type="checkbox" checked={session.autoReview} onchange={(event) => session.cancelReview(event.currentTarget.checked)} />自动复查</label><input aria-label="复查间隔（秒）" class="interval" type="number" bind:value={session.autoInterval} min="5" max="300" disabled={!session.autoReview || session.active} /><span>秒</span></div>
@@ -91,7 +106,7 @@
     </aside>
 
     <section class="results-panel">
-      <div class="results-heading"><div><div class="eyebrow">LIVE RESULT STREAM</div><h2>扫描结果</h2></div><div class="job-state"><span class:working={session.active} class="state-dot"></span>{session.job ? statuses[session.job.status] : '待机'}</div></div>
+      <div class="results-heading"><div><div class="eyebrow">LIVE RESULT STREAM</div><h2>扫描结果</h2></div><div class="job-state"><span class:working={session.active} class="state-dot"></span>{jobStatus}</div></div>
       <div class="metric-row">
         <div class="metric"><span>当前任务</span><strong>{session.job ? session.job.id.slice(0, 8) : '—'}</strong></div>
         <div class="metric"><span>已返回</span><strong>{session.job?.results.length ?? 0}</strong></div>
@@ -107,11 +122,11 @@
               {#each session.job.results as result}
                 <tr><td class="mono">{new Date(result.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</td><td>{deviceNames[result.device]}</td><td class="mono">{result.port}</td><td class="mono">{result.address ?? '—'}</td><td><span class={`status status-${result.status}`}>{statuses[result.status] ?? result.status}</span></td><td class="values">{valueSummary(result) || '—'}</td><td>{result.detail || '—'}</td></tr>
               {/each}
-            {:else}<tr class="empty"><td colspan="7"><span class="empty-icon" aria-hidden="true">◎</span><strong>等待扫描结果</strong><span>配置串口和协议后开始一次只读探测</span></td></tr>{/if}
+            {:else}<tr class="empty"><td colspan="7"><span class="empty-icon" aria-hidden="true">◎</span><strong>等待扫描结果</strong><span>配置串口和协议后开始一次只读探测，天平可另行执行去皮测试</span></td></tr>{/if}
           </tbody>
         </table>
       </div>
-      <footer class="results-footer"><span>不下发设定值或去皮命令；GS-CPA 连续输出需主动勾选。</span><button class="button quiet" onclick={() => session.downloadLog()} disabled={!session.connected}>导出日志</button></footer>
+      <footer class="results-footer"><span>扫描不下发设定值或去皮命令；去皮仅在点击「去皮测试」并确认后发送；GS-CPA 连续输出需主动勾选。</span><button class="button quiet" onclick={() => session.downloadLog()} disabled={!session.connected}>导出日志</button></footer>
       <p class="log-path" title={session.logPath}>日志：{session.logPath || '等待本地服务连接'}</p>
     </section>
   </section>

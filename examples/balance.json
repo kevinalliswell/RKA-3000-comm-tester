@@ -9,5 +9,7 @@
   "end_address": 1,
   "balance_protocol": "gs_cpa",
   "balance_lines": 10,
-  "balance_start_output": false
+  "balance_start_output": false,
+  "tare_timeout_s": 5.0,
+  "tare_zero_tolerance_g": 0.05
 }

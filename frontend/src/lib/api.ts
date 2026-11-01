@@ -15,6 +15,8 @@ export interface ScanConfig {
   balance_protocol: 'gs_cpa' | 'longteng';
   balance_lines: number;
   balance_start_output: boolean;
+  tare_timeout_s: number;
+  tare_zero_tolerance_g: number;
 }
 
 export interface PortInfo {
@@ -35,6 +37,7 @@ export interface ScanResult {
 
 export interface ScanJob {
   id: string;
+  operation: 'scan' | 'tare';
   status: 'queued' | 'running' | 'completed' | 'cancelled' | 'error';
   config: ScanConfig;
   results: ScanResult[];
@@ -74,6 +77,11 @@ export async function ports(): Promise<PortInfo[]> {
 
 export function startScan(config: ScanConfig): Promise<ScanJob> {
   return request('/api/scans', { method: 'POST', body: JSON.stringify(config) });
+}
+
+/** Sends a tare command to the balance; only call after the operator confirms. */
+export function startTare(config: ScanConfig): Promise<ScanJob> {
+  return request('/api/tare', { method: 'POST', body: JSON.stringify(config) });
 }
 
 export function getScan(id: string): Promise<ScanJob> {

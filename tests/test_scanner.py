@@ -1,5 +1,7 @@
 from threading import Event
 
+import pytest
+
 from rka_comm_tester.config import ScanConfig
 from rka_comm_tester.scanner import ScanResult, scan
 
@@ -191,3 +193,107 @@ def test_cancel_closes_balance_probe_before_scan_returns(monkeypatch):
     config = ScanConfig(device="balance", port="unused", balance_start_output=True)
     assert list(scan(config, stop)) == []
     assert cleanup == ["O0", "close"]
+
+
+def _fake_balance(monkeypatch, frames, *, on_read=None):
+    """Install a BalanceClient stand-in that replays frames and records serial actions."""
+    from rka_comm_tester._vendor import balance_serial
+
+    calls = []
+
+    class FakeClient:
+        def __init__(self, settings, protocol):
+            self.protocol = protocol
+            self.frames = iter(frames)
+
+        def open(self):
+            calls.append("open")
+
+        def initialize_device(self):
+            calls.append("O1")
+
+        def reset_input_buffer(self):
+            calls.append("reset")
+
+        def send_tare(self):
+            calls.append("tare")
+
+        def read_message(self):
+            if on_read:
+                on_read(calls)
+            raw = next(self.frames, None)
+            return None if raw is None else self.protocol.parse_message(raw)
+
+        def shutdown_device(self):
+            calls.append("O0")
+
+        def close(self):
+            calls.append("close")
+
+    monkeypatch.setattr(balance_serial, "BalanceClient", FakeClient)
+    return calls
+
+
+class _Clock:
+    """Advances one second per read so timeout paths finish without sleeping."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        self.now += 1.0
+        return self.now
+
+
+def test_tare_confirms_stable_zero_after_flushing_stale_frames(monkeypatch):
+    from rka_comm_tester.scanner import tare_test
+
+    calls = _fake_balance(monkeypatch, ["+0012.50 G S", "A00", "+0000.30 G U", "+0000.02 G S"])
+    cfg = ScanConfig(device="balance", port="COM9", balance_start_output=True)
+    [result] = list(tare_test(cfg))
+    assert result.status == "online"
+    assert result.values == {"before_g": 12.5, "ack": "A00", "after_g": 0.02, "raw": "+0000.02 G S"}
+    assert calls == ["open", "O1", "reset", "tare", "O0", "close"]
+
+
+def test_tare_reports_rejection_timeout_and_silence(monkeypatch):
+    from rka_comm_tester import scanner
+
+    monkeypatch.setattr(scanner, "time", _Clock())
+    cfg = ScanConfig(device="balance", port="COM9", balance_lines=1, tare_timeout_s=3)
+
+    _fake_balance(monkeypatch, ["+0012.50 G S", "E01"])
+    [result] = list(scanner.tare_test(cfg))
+    assert (result.status, result.values["raw"]) == ("error", "E01")
+
+    _fake_balance(monkeypatch, ["+0012.50 G S", "+0003.10 G S", "+0000.01 G U"])
+    [result] = list(scanner.tare_test(cfg))
+    assert result.status == "degraded"
+    assert result.values["after_g"] == 0.01  # unstable zero is not a confirmation
+
+    _fake_balance(monkeypatch, ["", "A00"])
+    [result] = list(scanner.tare_test(cfg))
+    assert (result.status, result.values["ack"]) == ("degraded", "A00")
+
+    calls = _fake_balance(monkeypatch, [])
+    [result] = list(scanner.tare_test(cfg))
+    assert result.status == "offline"
+    assert "tare" in calls
+
+
+def test_tare_cancelled_before_command_sends_nothing(monkeypatch):
+    from rka_comm_tester.scanner import tare_test
+
+    stop = Event()
+    calls = _fake_balance(monkeypatch, ["+0012.50 G U"], on_read=lambda calls: stop.set())
+    cfg = ScanConfig(device="balance", port="COM9", balance_start_output=True)
+    assert list(tare_test(cfg, stop)) == []
+    assert "tare" not in calls
+    assert calls[-2:] == ["O0", "close"]
+
+
+def test_tare_is_balance_only():
+    from rka_comm_tester.scanner import tare_test
+
+    with pytest.raises(ValueError):
+        tare_test(ScanConfig(device="taie", port="COM7"))

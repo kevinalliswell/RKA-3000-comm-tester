@@ -6,7 +6,7 @@ export class ScanSession {
   config: ScanConfig = $state({
     device: 'taie', port: '', baudrate: 19200, parity: 'N', stopbits: 1,
     timeout_s: 0.5, start_address: 1, end_address: 6, balance_protocol: 'gs_cpa',
-    balance_lines: 10, balance_start_output: false,
+    balance_lines: 10, balance_start_output: false, tare_timeout_s: 5, tare_zero_tolerance_g: 0.05,
   });
   ports: PortInfo[] = $state([]);
   job: ScanJob | null = $state(null);
@@ -42,7 +42,9 @@ export class ScanSession {
     } catch (error) {
       if (!this.disposed) {
         this.connected = false;
-        this.message = '业务服务未连接，正在重试…';
+        // Tauri reports a failed backend start here; keep its reason visible to the operator.
+        const detail = error instanceof Error ? error.message : String(error);
+        this.message = `业务服务未连接，正在重试…（${detail}）`;
       }
     }
   }
@@ -135,6 +137,23 @@ export class ScanSession {
     } finally { this.submitting = false; }
   }
 
+  /** Changes the balance zero; the caller must have the operator's confirmation. */
+  async beginTare() {
+    if (this.active || this.disposed || this.config.device !== 'balance') return;
+    this.autoReview = false;
+    clearTimeout(this.reviewTimer);
+    this.submitting = true;
+    this.error = '';
+    this.cancelling = false;
+    try {
+      this.job = await api.startTare(this.snapshot());
+      this.message = '去皮测试中；已发送去皮命令后停止不会撤销去皮。';
+      this.schedulePoll();
+    } catch (error) {
+      this.fail(error);
+    } finally { this.submitting = false; }
+  }
+
   async stopScan() {
     this.autoReview = false;
     clearTimeout(this.reviewTimer);
@@ -171,9 +190,10 @@ export class ScanSession {
       }
       this.cancelling = false;
       const status = this.job.status;
-      this.message = status === 'cancelled' ? '扫描已停止，结果不完整。'
-        : status === 'error' ? `扫描异常：${this.job.error}` : '扫描完成。';
-      if (this.autoReview && status === 'completed') {
+      const name = this.job.operation === 'tare' ? '去皮测试' : '扫描';
+      this.message = status === 'cancelled' ? `${name}已停止，结果不完整。`
+        : status === 'error' ? `${name}异常：${this.job.error}` : `${name}完成。`;
+      if (this.autoReview && status === 'completed' && this.job.operation === 'scan') {
         const delay = Math.min(300, Math.max(5, Number(this.autoInterval) || 30));
         this.message = `扫描完成，${delay} 秒后复查。`;
         this.reviewTimer = setTimeout(() => {

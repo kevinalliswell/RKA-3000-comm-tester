@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,9 +17,10 @@ from urllib.parse import urlsplit
 from .application import ScanConflict, ScanService
 from .logging_setup import setup_logging
 from .profiles import FileProfileStore
-from .scanner import available_ports, scan
+from .scanner import available_ports, scan, tare_test
 
-logger = logging.getLogger(__name__)
+# Not __name__: under `python -m` that is "__main__", outside the configured file logger.
+logger = logging.getLogger("rka_comm_tester.api")
 
 
 class ApiHandler(BaseHTTPRequestHandler):
@@ -87,6 +89,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._json(200, {"config": service.save_profile(self._read_json())})
             elif method == "POST" and path == "/api/scans":
                 self._json(202, service.start(self._read_json()))
+            elif method == "POST" and path == "/api/tare":
+                self._json(202, service.start_tare(self._read_json()))
             elif method == "POST" and path == "/api/shutdown":
                 self._json(202, {"ok": True})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -119,16 +123,37 @@ class ApiServer(ThreadingHTTPServer):
         super().__init__(address, ApiHandler)
 
 
-def run_server(host: str, port: int, log_file: Path | None = None) -> None:
+def _shutdown_on_stdin_eof(server: ApiServer) -> None:
+    # The owning desktop holds the write end; the OS closes it if that process dies.
+    stream = sys.stdin.buffer if sys.stdin is not None else None
+    if stream is None:
+        logger.warning("stdin unavailable; parent exit cannot be detected")
+        return
+    try:
+        while stream.read(4096):
+            pass
+    except (OSError, ValueError):
+        pass
+    logger.warning("owner process closed stdin; shutting down")
+    server.shutdown()
+
+
+def run_server(
+    host: str, port: int, log_file: Path | None = None, *, exit_on_stdin_eof: bool = False,
+) -> None:
     log_path = setup_logging(log_file, console=True)
     token = os.environ.get("RKA_API_TOKEN") or secrets.token_urlsafe(32)
     service = ScanService(
         log_path, scan, available_ports,
-        FileProfileStore(Path.home() / ".rka-comm-tester" / "config.json"),
+        FileProfileStore(Path.home() / ".rka-comm-tester" / "config.json"), tare=tare_test,
     )
     server = ApiServer((host, port), service, token)
     # Machine-readable handshake on stdout; diagnostic logs go to stderr/files.
     print(json.dumps({"port": server.server_port}), flush=True)
+    if exit_on_stdin_eof:
+        threading.Thread(
+            target=_shutdown_on_stdin_eof, args=(server,), name="stdin-watch", daemon=True,
+        ).start()
     try:
         server.serve_forever(poll_interval=0.1)
     except KeyboardInterrupt:
@@ -143,8 +168,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1"])
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--log-file", type=Path)
+    parser.add_argument("--exit-on-stdin-eof", action="store_true",
+                        help="stdin 关闭（父进程退出）时取消扫描并关闭服务")
     args = parser.parse_args(argv)
-    run_server(args.host, args.port, args.log_file)
+    run_server(args.host, args.port, args.log_file, exit_on_stdin_eof=args.exit_on_stdin_eof)
     return 0
 
 
