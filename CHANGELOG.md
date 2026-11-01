@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Add an operator-confirmed balance tare test (`POST /api/tare`): one tare command, then a
+  cancellable wait for a stable zero within a configurable timeout and tolerance.
+- Bound tare confirmation reads by the remaining deadline, reject late zero readings,
+  and report unknown responses as degraded rather than offline.
+- Keep the window open with the failure reason when the backend cannot start, log desktop
+  startup failures to `desktop.log`, and show a Windows error box if no window can be created.
+- Shut the backend down when the desktop process exits unexpectedly (stdin EOF).
+- Release builds run only the bundled `rka-backend.exe`; `RKA_PYTHON` and interpreter
+  fallbacks are limited to development builds.
+- Route API diagnostics to the user log also when started with `python -m`.
+
 ## 0.1.0 — 2026-10-31
 
 - Promote the Tauri 2 + Svelte 5 + Python sidecar desktop to the first stable software release.

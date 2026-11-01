@@ -19,7 +19,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [通讯协议与诊断边界](docs/protocols.md) | TAIE Modbus RTU、Azbil CPL、GS-CPA 与龙腾协议的帧、寄存器、状态判定和只读边界 |
+| [通讯协议与诊断边界](docs/protocols.md) | TAIE Modbus RTU、Azbil CPL、GS-CPA 与龙腾协议的帧、寄存器、状态判定、天平去皮测试和只读边界 |
 | [技术架构设计](docs/technical-architecture.md) | Tauri、Svelte、Python sidecar、进程生命周期、数据边界与 CI/CD |
 | [分层设计思路](docs/layered-design.md) | 六层职责、依赖方向、端口注入、新增协议步骤和测试对应关系 |
 | [分层与运行时细节](docs/architecture.md) | 扫描状态机、API 约定、进程收尾和扩展说明 |
@@ -54,7 +54,7 @@ npm --prefix frontend ci
 
 也可在仓库根目录执行 `npm run tauri dev`。Tauri 使用仓库 `.venv`，可通过 `RKA_PYTHON` 指向其他已安装此 Python 包的解释器。
 
-开发默认配置 `bundle.active=false`，无需预先冻结 Python。独立安装包使用单独的 `src-tauri/tauri.release.conf.json`，具体步骤见 [构建与发布](docs/releasing.md)。`RKA_PYTHON` 可显式覆盖随包后端，普通用户无需设置。
+开发默认配置 `bundle.active=false`，无需预先冻结 Python。独立安装包使用单独的 `src-tauri/tauri.release.conf.json`，具体步骤见 [构建与发布](docs/releasing.md)。`RKA_PYTHON` 只在开发构建中生效；发布构建只运行随包的 `rka-backend.exe`。
 
 macOS/Linux 同样使用 `.venv/bin/python`、`npm ci` 和 `npm run tauri dev`，另需安装 Tauri 对应系统的原生依赖。当前 CI 验证 Windows。
 
@@ -64,11 +64,12 @@ macOS/Linux 同样使用 `.venv/bin/python`、`npm ci` 和 `npm run tauri dev`�
 2. 填写波特率、校验位、停止位、超时与站号范围；Azbil 仅支持 `8E1` 或 `8N2`，站号 1–127。
 3. 开始扫描；在线、无响应、响应不完整和错误分别显示。停止会等待当前串口操作与驱动清理完成，结果标记为不完整。
 4. 自动复查间隔 5–300 秒，从一轮扫描结束后计时；取消扫描或关闭复查会撤销等待中的下一轮。
-5. 保存的配置由 Python 写入 `~/.rka-comm-tester/config.json`，重启后加载。可以导入/导出 JSON 配置、导出日志。
+5. 电子天平可执行「去皮测试」：确认后发送一次去皮命令，在设定等待时间内读到稳定零点（默认 ±0.05 g）即为成功。去皮会改变天平零点，不参与自动复查。
+6. 保存的配置由 Python 写入 `~/.rka-comm-tester/config.json`，重启后加载。可以导入/导出 JSON 配置、导出日志。
 
 默认日志为 `~/.rka-comm-tester/logs/communication.log`，5 MB 轮转，保留 3 个备份。页面显示实际路径。日志记录参数、串口枚举、协议结果与错误；Azbil 驱动另外记录收发帧。
 
-**诊断边界：** 不下发温度/流量设定值、去皮或任意寄存器写入。TAIE 以有效 PV 判断在线，SV 失败保留诊断提示；Azbil 需有效 PV、SP、实时量程且原始值在量程内。天平需稳定重量帧；GS-CPA 的 O1 连续输出默认关闭，主动勾选后结束/停止时发送 O0。离线测试不能代替真机验收。
+**诊断边界：** 扫描不下发温度/流量设定值、去皮或任意寄存器写入；天平去皮只在点击「去皮测试」并确认后发送。TAIE 以有效 PV 判断在线，SV 失败保留诊断提示；Azbil 需有效 PV、SP、实时量程且原始值在量程内。天平需稳定重量帧；GS-CPA 的 O1 连续输出默认关闭，主动勾选后结束/停止时发送 O0。离线测试不能代替真机验收。
 
 ## 无原生工具链时调试界面
 

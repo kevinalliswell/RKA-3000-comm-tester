@@ -35,13 +35,14 @@ class Probe(Protocol):
 
 
 class ScanConflict(ValueError):
-    """A scan is already using the communication adapter, or it is closing."""
+    """A scan or tare test is already using the communication adapter, or it is closing."""
 
 
 @dataclass
 class ScanJob:
     job_id: str
     config: ScanConfig
+    operation: str = "scan"
     cancel_event: threading.Event = field(default_factory=threading.Event)
     status: str = "queued"
     results: list[dict[str, Any]] = field(default_factory=list)
@@ -54,7 +55,7 @@ class ScanJob:
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             return {
-                "id": self.job_id, "status": self.status,
+                "id": self.job_id, "operation": self.operation, "status": self.status,
                 "config": self.config.to_dict(), "results": list(self.results),
                 "error": self.error, "created_at": self.created_at,
                 "started_at": self.started_at, "finished_at": self.finished_at,
@@ -62,14 +63,16 @@ class ScanJob:
 
 
 class ScanService:
-    """One active scan; cancellation completes only after driver cleanup."""
+    """One active scan or tare test; cancellation completes only after driver cleanup."""
 
     def __init__(
         self, log_path: Path, probe: Probe,
         list_ports: Callable[[], list[PortInfo]], profiles: ProfileStore,
+        *, tare: Probe | None = None,
     ) -> None:
         self.log_path = log_path
         self._probe = probe
+        self._tare = tare
         self._list_ports = list_ports
         self._profiles = profiles
         self._jobs: dict[str, ScanJob] = {}
@@ -98,17 +101,28 @@ class ScanService:
         return config.to_dict()
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start(ScanConfig(**payload), "scan", self._probe)
+
+    def start_tare(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Tare changes the balance zero; callers start it only on explicit operator request."""
         config = ScanConfig(**payload)
+        if config.device != "balance":
+            raise ValueError("去皮测试仅适用于电子天平")
+        if self._tare is None:
+            raise ValueError("当前服务未启用去皮测试")
+        return self._start(config, "tare", self._tare)
+
+    def _start(self, config: ScanConfig, operation: str, probe: Probe) -> dict[str, Any]:
         with self._lock:
             if self._closing or (self._worker is not None and self._worker.is_alive()):
-                raise ScanConflict("已有扫描正在运行或清理，请稍候")
+                raise ScanConflict("已有扫描或去皮测试正在运行或清理，请稍候")
             # Keep a bounded in-memory history instead of leaking every auto-review job.
             while len(self._jobs) >= 50:
                 self._jobs.pop(next(iter(self._jobs)))
-            job = ScanJob(uuid.uuid4().hex, config)
+            job = ScanJob(uuid.uuid4().hex, config, operation)
             self._jobs[job.job_id] = job
             self._worker = threading.Thread(
-                target=self._run, args=(job,), name=f"scan-{job.job_id[:8]}",
+                target=self._run, args=(job, probe), name=f"{operation}-{job.job_id[:8]}",
             )
             self._worker.start()
         return job.snapshot()
@@ -138,7 +152,7 @@ class ScanService:
         if worker:
             worker.join()  # Drivers own bounded I/O and finally-based cleanup.
 
-    def _run(self, job: ScanJob) -> None:
+    def _run(self, job: ScanJob, probe: Probe) -> None:
         with job.lock:
             job.status = "running"
             job.started_at = _now()
@@ -146,11 +160,11 @@ class ScanService:
         error = None
         try:
             if not job.cancel_event.is_set():
-                for result in self._probe(job.config, job.cancel_event):
+                for result in probe(job.config, job.cancel_event):
                     with job.lock:
                         job.results.append(result.to_dict())
         except Exception as exc:
-            logger.exception("scan job failed: %s", job.job_id)
+            logger.exception("%s job failed: %s", job.operation, job.job_id)
             error = f"{type(exc).__name__}: {exc}"
             terminal_status = "error"
         finally:

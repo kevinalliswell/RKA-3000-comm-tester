@@ -19,6 +19,8 @@ class ScanConfig:
     balance_protocol: str = "gs_cpa"
     balance_lines: int = 10
     balance_start_output: bool = False
+    tare_timeout_s: float = 5.0
+    tare_zero_tolerance_g: float = 0.05
 
     def __post_init__(self) -> None:
         if not isinstance(self.device, str) or self.device not in {"taie", "azbil", "balance"}:
@@ -47,6 +49,13 @@ class ScanConfig:
             raise ValueError("天平读取帧数须在 1–100 之间")
         if type(self.balance_start_output) is not bool:
             raise ValueError("天平连续输出选项须为布尔值")
+        if (type(self.tare_timeout_s) not in {int, float} or not math.isfinite(self.tare_timeout_s)
+                or not 1 <= self.tare_timeout_s <= 30):
+            raise ValueError("去皮等待时间须在 1–30 秒之间")
+        if (type(self.tare_zero_tolerance_g) not in {int, float}
+                or not math.isfinite(self.tare_zero_tolerance_g)
+                or not 0 < self.tare_zero_tolerance_g <= 10):
+            raise ValueError("去皮零点容差须大于 0 且不超过 10 g")
 
     @property
     def addresses(self) -> range:

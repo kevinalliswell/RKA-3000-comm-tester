@@ -45,17 +45,17 @@ stateDiagram-v2
 
 取消是请求：收到取消后任务仍为 `running`，直到当前有界读操作结束，驱动 `finally` 关闭串口并为已启动的 GS-CPA 输出发送 O0。已有完成状态不会被随后收到的取消改写。扫描结果中的 `error/offline/degraded` 是设备诊断状态；任务 `completed` 表示流程结束，不代表设备在线。
 
-服务同时最多运行一个扫描，避免同一串口被重入；冲突返回 409。UI 提交请求时也立即锁定，防止双击。自动复查只在上一任务 `completed` 后排定，停止扫描时取消自动复查。失败的轮询继续重试，不丢弃活动任务。
+服务同时最多运行一个扫描或去皮测试，避免同一串口被重入；冲突返回 409。去皮测试复用相同的任务状态、取消和清理流程，但不触发自动复查。UI 提交请求时也立即锁定，防止双击。自动复查只在上一任务 `completed` 后排定，停止扫描时取消自动复查。失败的轮询继续重试，不丢弃活动任务。
 
 ## 进程生命周期与边界
 
-1. 显式设置 `RKA_PYTHON` 时使用该解释器；否则优先运行主程序旁的 `rka-backend.exe`。开发时回退至仓库 `.venv`；未附 sidecar 的 release 回退至可执行文件旁 `.venv`，最后回退系统 Python。
+1. 发布构建只运行主程序旁的 `rka-backend.exe`，缺失时页面显示原因，不回退到任何 Python 解释器。开发构建中显式设置 `RKA_PYTHON` 时使用该解释器，否则优先 sidecar，再回退至仓库 `.venv`，最后回退系统 Python。
 2. 创建随机令牌并通过环境变量传给 Python，监听 `127.0.0.1:0`，由系统分配空闲端口。
-3. Python 完成服务创建后向 stdout 输出 `{"port": number}`，诊断写 stderr/日志。Tauri 最多等 30 秒，包含冻结程序首次解压启动时间；启动失败清理子进程。
+3. Python 完成服务创建后向 stdout 输出 `{"port": number}`，诊断写 stderr/日志。Tauri 最多等 30 秒，包含冻结程序首次解压启动时间；启动失败清理子进程，原因写入 `~/.rka-comm-tester/logs/desktop.log`，窗口仍打开并在页面显示失败原因。窗口本身无法创建（如缺少 WebView2）时记录同一日志，Windows 上弹出系统错误框。
 4. 页面通过 Tauri IPC 请求白名单接口，令牌保留在 Rust。Python 不开放跨域请求，并要求每个业务请求带令牌。
 5. 退出时 Tauri 发送私有 shutdown 请求；Python 关闭服务、取消扫描并等待驱动清理。Tauri 等待进程结束，90 秒仍未退出才强制回收并输出诊断。
 
-正常关闭走上述收尾流程；进程崩溃、断电或被外部强制终止无法保证 O0 发送成功。冻结服务仍使用相同 API、应用与领域模块，打包不复制另一套业务逻辑。PyInstaller onefile 的引导进程和实际服务进程由正常 shutdown 一起退出；CI 检查窗口退出后不存在遗留业务进程。
+Tauri 以 `--exit-on-stdin-eof` 启动后端并在整个运行期间持有其 stdin 管道写端。桌面进程崩溃或被强制结束时，操作系统关闭该管道，Python 读到 EOF 后走与 shutdown 相同的收尾（取消扫描、等待驱动清理、关闭服务），不会遗留占用串口的后端进程。正常关闭走上述收尾流程；断电或后端自身被强制终止时仍无法保证 O0 发送成功。冻结服务仍使用相同 API、应用与领域模块，打包不复制另一套业务逻辑。PyInstaller onefile 的引导进程和实际服务进程由正常 shutdown 一起退出；CI 检查窗口退出后不存在遗留业务进程。
 
 ## 构建与交付边界
 
@@ -72,8 +72,9 @@ stateDiagram-v2
 | GET | `/api/health` | 服务名、活动扫描数、日志路径 |
 | GET | `/api/ports` | 系统端口列表，不探测设备 |
 | GET / POST | `/api/config` | 加载 / 校验并保存用户配置 |
-| POST | `/api/scans` | 202 + 任务快照 |
-| GET | `/api/scans/{id}` | 任务状态、配置快照和本轮结果 |
+| POST | `/api/scans` | 202 + 任务快照（`operation: "scan"`） |
+| POST | `/api/tare` | 202 + 去皮测试任务快照（`operation: "tare"`）；仅电子天平，需页面确认 |
+| GET | `/api/scans/{id}` | 任务类型、状态、配置快照和本轮结果（扫描与去皮共用） |
 | POST | `/api/scans/{id}/cancel` | 请求取消，返回当前快照 |
 | GET | `/api/log` | 当前日志文件名与 UTF-8 内容 |
 | POST | `/api/shutdown` | 202，开始关闭；仅桌面进程使用，不向页面暴露 |

@@ -70,6 +70,7 @@ h2 { font-size: 17px; letter-spacing: .01em; }
 .button.primary:hover:not(:disabled) { background: #1b486b; }
 .button.secondary { color: var(--red); background: var(--red-soft); border-color: #efc5c1; }
 .button.quiet { color: #536973; background: #f5f8f8; border-color: #d4e0e2; }
+.button.tare { grid-column: 1 / -1; color: var(--amber); background: var(--amber-soft); border-color: #f0d3a4; }
 .auto-row { margin-top: 16px; }
 .auto-row .interval { width: 58px; min-height: 28px; padding: 4px 6px; text-align: center; }
 .results-heading .job-state { padding-top: 4px; }

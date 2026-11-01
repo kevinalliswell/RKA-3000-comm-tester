@@ -1,7 +1,11 @@
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 from http.client import HTTPConnection
+from pathlib import Path
 
 import pytest
 
@@ -27,10 +31,11 @@ def wait_for(service, job_id, status):
 def make_service(tmp_path):
     services = []
 
-    def create(probe):
+    def create(probe, tare=None):
         path = tmp_path / "communication.log"
         path.write_text("test log\n", encoding="utf-8")
-        service = ScanService(path, probe, lambda: [], FileProfileStore(tmp_path / "config.json"))
+        service = ScanService(path, probe, lambda: [], FileProfileStore(tmp_path / "config.json"),
+                              tare=tare)
         services.append(service)
         return service
 
@@ -116,11 +121,43 @@ def test_unexpected_probe_failure_is_visible(make_service):
     assert result["error"] == "RuntimeError: driver failed"
 
 
+def test_tare_is_a_separate_balance_only_job_sharing_the_port_lock(make_service):
+    started = threading.Event()
+
+    def probe(config, cancelled):
+        started.set()
+        cancelled.wait(2)
+        return
+        yield
+
+    def tare(config, cancelled):
+        yield ScanResult(config.device, config.port, None, "online", {"after_g": 0.0})
+
+    balance = PAYLOAD | {"device": "balance"}
+    with pytest.raises(ValueError):
+        make_service(probe).start_tare(balance)  # not wired
+    service = make_service(probe, tare)
+    with pytest.raises(ValueError):
+        service.start_tare(PAYLOAD)  # TAIE has no tare
+    job = service.start(balance)
+    assert started.wait(1)
+    with pytest.raises(ScanConflict):
+        service.start_tare(balance)
+    service.cancel(job["id"])
+    wait_for(service, job["id"], "cancelled")
+    job = service.start_tare(balance)
+    assert job["operation"] == "tare"
+    assert wait_for(service, job["id"], "completed")["results"][0]["values"] == {"after_g": 0.0}
+
+
 def test_http_authorization_validation_profile_and_error_paths(make_service):
     def probe(config, cancelled):
         yield ScanResult(config.device, config.port, 1, "online")
 
-    service = make_service(probe)
+    def tare(config, cancelled):
+        yield ScanResult(config.device, config.port, None, "online")
+
+    service = make_service(probe, tare)
     server = ApiServer(("127.0.0.1", 0), service, "test-secret")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -148,8 +185,12 @@ def test_http_authorization_validation_profile_and_error_paths(make_service):
         for bad in [{}, [], PAYLOAD | {"port": None}, PAYLOAD | {"timeout_s": "bad"},
                     PAYLOAD | {"stopbits": True}, PAYLOAD | {"start_address": 2}]:
             assert request("POST", "/api/scans", bad)[0] == 400
+        assert request("POST", "/api/tare", PAYLOAD)[0] == 400
+        status, job = request("POST", "/api/tare", PAYLOAD | {"device": "balance"})
+        assert (status, job["operation"]) == (202, "tare")
+        wait_for(service, job["id"], "completed")
         status, job = request("POST", "/api/scans", PAYLOAD)
-        assert status == 202
+        assert (status, job["operation"]) == (202, "scan")
         assert request("GET", f"/api/scans/{job['id']}")[0] == 200
         assert request("GET", "/api/scans/missing")[0] == 404
         assert request("POST", "/api/scans/missing/cancel", {})[0] == 404
@@ -169,3 +210,47 @@ def test_api_rejects_non_loopback_and_empty_token(make_service):
         ApiServer(("0.0.0.0", 0), service, "secret")
     with pytest.raises(ValueError):
         ApiServer(("127.0.0.1", 0), service, "")
+
+
+def _start_backend(tmp_path, *extra, stdin):
+    src = Path(__file__).resolve().parents[1] / "src"
+    environment = dict(os.environ, RKA_API_TOKEN="secret", PYTHONPATH=str(src),
+                       HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    process = subprocess.Popen(
+        [sys.executable, "-m", "rka_comm_tester.api", "--port", "0",
+         "--log-file", str(tmp_path / "communication.log"), *extra],
+        env=environment, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    port = json.loads(process.stdout.readline())["port"]
+    return process, port
+
+
+def test_backend_exits_when_owner_closes_stdin(tmp_path):
+    process, _ = _start_backend(tmp_path, "--exit-on-stdin-eof", stdin=subprocess.PIPE)
+    try:
+        assert process.poll() is None
+        process.stdin.close()  # What the OS does when the desktop process dies.
+        assert process.wait(timeout=10) == 0
+        # Also under `python -m`, API diagnostics must reach the user log file.
+        log = (tmp_path / "communication.log").read_text(encoding="utf-8")
+        assert "rka_comm_tester.api owner process closed stdin" in log
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
+def test_backend_without_stdin_watch_ignores_closed_stdin(tmp_path):
+    process, port = _start_backend(tmp_path, stdin=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        assert process.poll() is None
+        connection = HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request("POST", "/api/shutdown", headers={"Authorization": "Bearer secret"})
+        assert connection.getresponse().status == 202
+        assert process.wait(timeout=10) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
