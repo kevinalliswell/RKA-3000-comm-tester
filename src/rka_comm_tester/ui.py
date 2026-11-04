@@ -77,14 +77,15 @@ class MainWindow(QMainWindow):
         title = QLabel("设备通信检查")
         title.setObjectName("title")
         layout.addWidget(title)
-        layout.addWidget(QLabel("TAIE · Azbil CPL · 电子天平  |  仅探测与读取，不下发设定值或去皮"))
+        layout.addWidget(QLabel("TAIE · Azbil CPL · Azbil C2/C3 · 电子天平  |  仅探测与读取，不下发设定值或去皮"))
 
         form_box = QGroupBox("连接参数")
         form = QFormLayout(form_box)
         layout.addWidget(form_box)
 
         self.device = QComboBox()
-        for label, value in (("TAIE 温控仪", "taie"), ("Azbil MFC", "azbil"), ("电子天平", "balance")):
+        for label, value in (("TAIE 温控仪", "taie"), ("Azbil MFC", "azbil"),
+                             ("Azbil C2/C3 温控器", "azbil_temp"), ("电子天平", "balance")):
             self.device.addItem(label, value)
         form.addRow("设备协议", self.device)
 
@@ -147,6 +148,11 @@ class MainWindow(QMainWindow):
         balance_row.addWidget(self.balance_start)
         balance_row.addStretch()
         form.addRow("天平选项", balance_row)
+
+        self.azbil_temp_protocol = QComboBox()
+        self.azbil_temp_protocol.addItem("Modbus RTU", "modbus_rtu")
+        self.azbil_temp_protocol.addItem("CPL", "cpl")
+        form.addRow("温控器协议", self.azbil_temp_protocol)
 
         action_row = QHBoxLayout()
         self.scan_button = QPushButton("开始扫描")
@@ -224,10 +230,13 @@ class MainWindow(QMainWindow):
         is_balance = kind == "balance"
         for widget in (self.start_address, self.end_address):
             widget.setEnabled(not is_balance)
-            widget.setMaximum(127 if kind == "azbil" else 247)
+            widget.setMaximum(127 if kind in {"azbil", "azbil_temp"} else 247)
         for widget in (self.balance_protocol, self.balance_lines, self.balance_start):
             widget.setEnabled(is_balance)
-        if kind == "azbil":
+        self.azbil_temp_protocol.setEnabled(kind == "azbil_temp")
+        if kind in {"azbil", "azbil_temp"}:
+            if kind == "azbil_temp":
+                self.baud.setCurrentText("9600")
             self.parity.setCurrentText("E")
             self.stopbits.setCurrentText("1")
             self.end_address.setValue(min(self.end_address.value(), 127))
@@ -267,6 +276,7 @@ class MainWindow(QMainWindow):
             start_address=self.start_address.value(), end_address=self.end_address.value(),
             balance_protocol=self.balance_protocol.currentData(),
             balance_lines=self.balance_lines.value(), balance_start_output=self.balance_start.isChecked(),
+            azbil_temp_protocol=self.azbil_temp_protocol.currentData(),
         )
 
     def start_scan(self) -> None:
@@ -358,6 +368,8 @@ class MainWindow(QMainWindow):
         self.balance_protocol.setCurrentIndex(self.balance_protocol.findData(cfg.balance_protocol))
         self.balance_lines.setValue(cfg.balance_lines)
         self.balance_start.setChecked(cfg.balance_start_output)
+        self.azbil_temp_protocol.setCurrentIndex(
+            self.azbil_temp_protocol.findData(cfg.azbil_temp_protocol))
         logger.info("config loaded: %s", path)
 
     def export_log(self) -> None:

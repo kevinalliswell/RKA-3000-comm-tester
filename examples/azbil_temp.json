@@ -1,0 +1,11 @@
+{
+  "device": "azbil_temp",
+  "port": "COM7",
+  "baudrate": 9600,
+  "parity": "E",
+  "stopbits": 1,
+  "timeout_s": 1.0,
+  "start_address": 1,
+  "end_address": 3,
+  "azbil_temp_protocol": "modbus_rtu"
+}

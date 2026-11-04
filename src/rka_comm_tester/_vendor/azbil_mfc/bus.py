@@ -36,10 +36,12 @@ class RS485Bus:
         retry_delay: float = DEFAULT_RETRY_DELAY_S,
         min_command_interval: float = DEFAULT_MIN_COMMAND_INTERVAL_S,
         background_cooldown: float = DEFAULT_BACKGROUND_COOLDOWN_S,
+        serial_format: Optional[tuple[str, float]] = None,
     ):
         self.port = port
         self.baudrate = baudrate
         self.comm_format = comm_format
+        self.serial_format = serial_format
         self.timeout = timeout
         self.command_retries = max(0, int(command_retries))
         self.retry_delay = max(0.0, retry_delay)
@@ -56,7 +58,9 @@ class RS485Bus:
         if self._serial and self._serial.is_open:
             return
 
-        if self.comm_format == COMM_8E1:
+        if self.serial_format is not None:
+            parity, stopbits = self.serial_format
+        elif self.comm_format == COMM_8E1:
             parity = serial.PARITY_EVEN
             stopbits = serial.STOPBITS_ONE
         else:
@@ -74,10 +78,11 @@ class RS485Bus:
                 write_timeout=DEFAULT_WRITE_TIMEOUT,
             )
             logger.info(
-                "串口已打开: %s @ %d bps, %s",
+                "串口已打开: %s @ %d bps, 8%s%g",
                 self.port,
                 self.baudrate,
-                "8E1" if self.comm_format == COMM_8E1 else "8N2",
+                parity,
+                stopbits,
             )
         except serial.SerialException as exc:
             raise CPLConnectionError(f"无法打开串口 {self.port}: {exc}") from exc

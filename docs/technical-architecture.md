@@ -15,6 +15,7 @@ flowchart LR
     Scanner[串口探测适配器] -.实现 Probe.-> Ports
     Scanner --> TAIE[TAIE Modbus RTU]
     Scanner --> Azbil[Azbil CPL]
+    Scanner --> AzbilTemp[Azbil C2/C3 Modbus RTU / CPL]
     Scanner --> Balance[GS-CPA / 龙腾 ASCII]
     Store[配置文件适配器] -.实现 ProfileStore.-> Ports
     API --> Logs[轮转日志初始化]

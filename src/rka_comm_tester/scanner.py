@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import asdict
 from threading import Event
 from typing import Callable, Iterator
@@ -31,7 +31,8 @@ def scan(
     on_result: Callable[[ScanResult], None] | None = None,
 ) -> Iterator[ScanResult]:
     """Probe one configured port in a worker thread; check cancellation between addresses."""
-    probe = {"taie": _scan_taie, "azbil": _scan_azbil, "balance": _scan_balance}[cfg.device]
+    probe = {"taie": _scan_taie, "azbil": _scan_azbil, "azbil_temp": _scan_azbil_temp,
+             "balance": _scan_balance}[cfg.device]
     return _run_probe("scan", probe, cfg, cancelled, on_result)
 
 
@@ -157,6 +158,105 @@ def _scan_azbil(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
                 yield ScanResult(cfg.device, cfg.port, address, "degraded", values, f"PV 已响应，SP/量程校验失败: {exc}")
             else:
                 yield ScanResult(cfg.device, cfg.port, address, "online", values, "PV/SP 与量程有效")
+
+
+# Azbil C2/C3 word addresses from manual CP-SP-1478C chapter 10. Everything except the control
+# status stays readable while the instrument's communication lock (C.LOc) is on.
+_C23_PV = 0x238D
+_C23_SP = 0x238E
+_C23_MV = 0x2391
+_C23_PV_DECIMALS = 0x1454
+_C23_INPUT_ALARM = 0x23F1
+_C23_CONTROL_STATUS = 0x23F4
+_C23_INPUT_ALARMS = {
+    0: "AL01 PV 超量程", 1: "AL02 PV 欠量程", 2: "AL03 基准结补偿/热电阻输入异常",
+    4: "AL05 RSP 超量程", 5: "AL06 RSP 欠量程", 6: "AL07 MFB 输入异常",
+    9: "AL10 马达调整异常", 10: "AL11 CT1/CT 输入异常", 11: "AL12 CT2/VT 输入异常",
+}
+
+
+@contextmanager
+def _open_azbil_temp(cfg: ScanConfig):
+    """Yield (read_word(address, register), timeout_error) for the instrument's protocol."""
+    if cfg.azbil_temp_protocol == "cpl":
+        from ._vendor.azbil_mfc.bus import RS485Bus
+        from ._vendor.azbil_mfc.exceptions import CPLTimeoutError
+
+        bus = RS485Bus(cfg.port, baudrate=cfg.baudrate, timeout=cfg.timeout_s, command_retries=0,
+                       serial_format=(cfg.parity, cfg.stopbits))
+        with bus:
+            yield (lambda address, register: bus.read_registers(address, register, 1)[0],
+                   CPLTimeoutError)
+        return
+
+    from ._vendor.taie_temp.modbus_rtu import (
+        ModbusTimeoutError,
+        SerialSettings,
+        TaieModbusRtuClient,
+    )
+
+    settings = SerialSettings(
+        port=cfg.port, baudrate=cfg.baudrate, parity=cfg.parity,
+        stopbits=cfg.stopbits, timeout=cfg.timeout_s, read_retry_attempts=0,
+        open_settle_delay=0.2, post_write_delay=0.05, inter_request_delay=0.12,
+    )
+    # The client is plain Modbus RTU; only its register symbols are TAIE specific.
+    with TaieModbusRtuClient(cfg.start_address, settings) as client:
+        def read_word(address: int, register: int) -> int:
+            client.slave_id = address
+            return client.read_holding_registers(register, 1)[0]
+
+        yield read_word, ModbusTimeoutError
+
+
+def _scan_azbil_temp(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
+    from ._vendor.taie_temp.modbus_rtu import to_signed_16
+
+    with _open_azbil_temp(cfg) as (read_word, timeout_error):
+        for address in cfg.addresses:
+            if stop.is_set():
+                break
+            try:
+                pv_raw = read_word(address, _C23_PV)
+            except timeout_error as exc:
+                yield ScanResult(cfg.device, cfg.port, address, "offline", detail=str(exc))
+                continue
+            except Exception as exc:
+                yield ScanResult(cfg.device, cfg.port, address, "error", detail=str(exc))
+                continue
+            values = {"pv_raw": pv_raw}
+            try:
+                sp_raw = read_word(address, _C23_SP)
+                mv_raw = read_word(address, _C23_MV)
+                decimals = read_word(address, _C23_PV_DECIMALS)
+                input_alarm = read_word(address, _C23_INPUT_ALARM)
+                if not 0 <= decimals <= 3:
+                    raise ValueError(f"PV 小数点位置 {decimals} 无效")
+            except Exception as exc:
+                yield ScanResult(cfg.device, cfg.port, address, "degraded", values,
+                                 f"PV 已响应，SP/MV/小数点/报警校验失败: {exc}")
+                continue
+            # PV and SP share the live PV decimal position; MV always has one decimal.
+            values.update(
+                sp_raw=sp_raw, mv_raw=mv_raw, pv_decimals=decimals, input_alarm=input_alarm,
+                pv=to_signed_16(pv_raw) / 10**decimals, sp=to_signed_16(sp_raw) / 10**decimals,
+                mv_pct=to_signed_16(mv_raw) / 10,
+            )
+            note = ""
+            try:
+                control = read_word(address, _C23_CONTROL_STATUS)
+                values.update(run_ready="READY" if control & 0x02 else "RUN",
+                              auto_manual="MANUAL" if control & 0x01 else "AUTO")
+            except Exception as exc:
+                note = f"；控制状态不可读（仪表可能处于通讯锁定）: {exc}"
+            if input_alarm:
+                # A PV alarm pins PV at its display limit, so a readable PV alone proves nothing.
+                alarms = [name for bit, name in _C23_INPUT_ALARMS.items() if input_alarm >> bit & 1]
+                yield ScanResult(cfg.device, cfg.port, address, "degraded", values,
+                                 f"仪表输入报警: {'、'.join(alarms) or f'0x{input_alarm:04X}'}{note}")
+            else:
+                yield ScanResult(cfg.device, cfg.port, address, "online", values,
+                                 f"PV/SP/MV 与小数点有效，无输入报警{note}")
 
 
 def _open_balance(cfg: ScanConfig):

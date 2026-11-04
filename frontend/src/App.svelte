@@ -5,7 +5,7 @@
 
   const session = new ScanSession();
   const deviceNames: Record<DeviceType, string> = {
-    taie: 'TAIE 温控仪', azbil: 'Azbil MFC', balance: '电子天平',
+    taie: 'TAIE 温控仪', azbil: 'Azbil MFC', azbil_temp: 'Azbil C2/C3 温控器', balance: '电子天平',
   };
   const statuses: Record<string, string> = {
     queued: '等待扫描', running: '扫描中', completed: '已完成', cancelled: '已停止',
@@ -16,7 +16,7 @@
   const jobStatus = $derived(session.job
     ? (session.job.operation === 'tare' && tareStatuses[session.job.status]) || statuses[session.job.status]
     : '待机');
-  const maxAddress = $derived(session.config.device === 'azbil' ? 127 : 247);
+  const maxAddress = $derived(['azbil', 'azbil_temp'].includes(session.config.device) ? 127 : 247);
   const onlineCount = $derived(session.job?.results.filter((result) => result.status === 'online').length ?? 0);
   let importInput: HTMLInputElement;
 
@@ -56,7 +56,7 @@
         <fieldset disabled={session.active}>
           <label class="field"><span>设备协议</span>
             <select value={session.config.device} onchange={(event) => session.selectDevice(event.currentTarget.value as DeviceType)}>
-              <option value="taie">TAIE 温控仪</option><option value="azbil">Azbil MFC</option><option value="balance">电子天平</option>
+              <option value="taie">TAIE 温控仪</option><option value="azbil">Azbil MFC</option><option value="azbil_temp">Azbil C2/C3 温控器</option><option value="balance">电子天平</option>
             </select>
           </label>
           <label class="field port-field"><span>串口</span>
@@ -70,6 +70,10 @@
             <label class="field"><span>停止位</span><select bind:value={session.config.stopbits}><option value={1}>1</option><option value={2}>2</option></select></label>
           </div>
           {#if session.config.device === 'azbil'}<p class="hint">Azbil 支持 8E1 或 8N2，地址范围 1–127。</p>{/if}
+          {#if session.config.device === 'azbil_temp'}
+            <label class="field port-field"><span>通讯协议</span><select bind:value={session.config.azbil_temp_protocol}><option value="modbus_rtu">Modbus RTU</option><option value="cpl">CPL</option></select></label>
+            <p class="hint">须与仪表 C064–C069 一致，出厂为 CPL、19200、8E1，地址 C065 出厂为 0（不通讯）；地址范围 1–127。</p>
+          {/if}
           <div class:muted={isBalance} class="section-divider"><span>站号范围</span><span class="hint">{isBalance ? '天平不使用站号' : `1–${maxAddress}`}</span></div>
           <div class="field-grid two">
             <label class="field"><span>起始地址</span><input type="number" bind:value={session.config.start_address} min="1" max={maxAddress} required disabled={isBalance} /></label>

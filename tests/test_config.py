@@ -27,6 +27,7 @@ def test_scan_config_round_trip(tmp_path):
     {"start_address": 8, "end_address": 7}, {"device": "azbil", "end_address": 128},
     {"device": "balance", "balance_protocol": "unknown"},
     {"balance_start_output": "false"},
+    {"device": "azbil_temp", "end_address": 128}, {"azbil_temp_protocol": "modbus_ascii"},
     {"tare_timeout_s": 0.5}, {"tare_timeout_s": 31}, {"tare_timeout_s": float("nan")},
     {"tare_zero_tolerance_g": 0}, {"tare_zero_tolerance_g": 11}, {"tare_zero_tolerance_g": "0.05"},
 ])
