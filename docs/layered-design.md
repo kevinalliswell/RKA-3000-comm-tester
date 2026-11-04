@@ -35,7 +35,7 @@ flowchart BT
 
 - **输入规则**放在 `ScanConfig`：设备类型、端口、波特率、校验位、停止位、超时、地址和天平帧数都在进入应用服务前校验。UI 的 HTML 约束只是即时反馈，不能替代 Python 校验。
 - **任务规则**放在 `ScanService`：一个服务实例同时只运行一个任务；取消只设置事件，任务状态在驱动清理后变为终态；历史最多 50 条。
-- **协议规则**放在 `scanner.py` 和钉定驱动：TAIE 的 PV/SV、Azbil 的 CPL/量程、天平稳定帧和错误码都在基础设施边界内转为统一 `ScanResult`。
+- **协议规则**放在 `scanner.py` 和钉定驱动：TAIE 的 PV/SV、Azbil 的 CPL/量程、Azbil C2/C3 的小数点与输入报警、天平稳定帧和错误码都在基础设施边界内转为统一 `ScanResult`。
 - **安全边界**放在 API 与桌面层：loopback、Bearer token、白名单 IPC、动态端口和进程退出策略不能由页面自行决定。
 - **持久化规则**放在 `FileProfileStore` 和日志适配器：应用层只知道 `ProfileStore`，不关心 JSON 文件和轮转实现。
 

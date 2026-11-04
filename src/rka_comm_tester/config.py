@@ -21,10 +21,12 @@ class ScanConfig:
     balance_start_output: bool = False
     tare_timeout_s: float = 5.0
     tare_zero_tolerance_g: float = 0.05
+    azbil_temp_protocol: str = "modbus_rtu"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.device, str) or self.device not in {"taie", "azbil", "balance"}:
-            raise ValueError("device must be taie, azbil or balance")
+        if (not isinstance(self.device, str)
+                or self.device not in {"taie", "azbil", "azbil_temp", "balance"}):
+            raise ValueError("device must be taie, azbil, azbil_temp or balance")
         if not isinstance(self.port, str) or not self.port.strip():
             raise ValueError("请选择串口")
         if type(self.baudrate) is not int or not 300 <= self.baudrate <= 921600:
@@ -37,11 +39,14 @@ class ScanConfig:
             raise ValueError("超时须在 0.05–10 秒之间")
         if type(self.start_address) is not int or type(self.end_address) is not int:
             raise ValueError("地址须为整数")
-        maximum = 127 if self.device == "azbil" else 247
+        maximum = 127 if self.device in {"azbil", "azbil_temp"} else 247
         if not 1 <= self.start_address <= self.end_address <= maximum:
             raise ValueError(f"地址范围须在 1–{maximum} 内且起点不大于终点")
         if self.device == "azbil" and (self.parity, self.stopbits) not in {("E", 1), ("N", 2)}:
             raise ValueError("Azbil CPL 串口格式仅支持 8E1 或 8N2")
+        if (not isinstance(self.azbil_temp_protocol, str)
+                or self.azbil_temp_protocol not in {"modbus_rtu", "cpl"}):
+            raise ValueError("Azbil 温控器协议须为 modbus_rtu 或 cpl")
         if (not isinstance(self.balance_protocol, str)
                 or self.balance_protocol not in {"gs_cpa", "longteng"}):
             raise ValueError("不支持的天平协议")

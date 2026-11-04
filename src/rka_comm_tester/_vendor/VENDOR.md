@@ -12,6 +12,8 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   validation plus outbound range checks.
 - `azbil_mfc/bus.py`: reject replies from another address or with the wrong register count;
   never automatically retry a write.
+- `azbil_mfc/bus.py`: optional `serial_format` lets the C2/C3 probe use any parity and stop
+  bits the instrument offers, instead of only the MQV 8E1/8N2 formats.
 - `azbil_mfc/client.py`: a forced live scale refresh cannot silently fall back to stale
   cached metadata.
 - `taie_temp/modbus_rtu.py`: assemble fragmented serial reads, bound byte counts, verify
@@ -41,6 +43,14 @@ repositories and exact pinned revisions are listed below.
 | `azbil_mfc` | github.com/kevinalliswell/azbil-mfc | 83ddc491 | MIT | bus, client, protocol, constants, registers, exceptions, device_catalog, (trimmed) __init__ | dashboard/, mixer, recipe, scheduler, safety |
 | `taie_temp` | github.com/kevinalliswell/taie-temp-controller | ab18b921 | Apache-2.0 | controller, modbus_rtu, register_addresses, __init__ | api, polling, acquisition |
 | `balance_serial` | github.com/kevinalliswell/balance-serial | 496b7b76 | (no upstream LICENSE) | client, factory, models, exceptions, protocols/{base,gs_cpa,longteng}, __init__ | device, examples |
+
+## Azbil C2/C3 temperature controller
+
+No code from github.com/kevinalliswell/azbil-temp-controller (642ef05) is vendored: it needs
+pymodbus and PyYAML, while its transports duplicate the validated read paths already pinned
+here. `scanner.py` runs the C2/C3 probe over `taie_temp/modbus_rtu.py` and `azbil_mfc/bus.py`,
+with word addresses taken from manual CP-SP-1478C chapter 10 and cross-checked against that
+repository. Modbus/ASCII is therefore not available.
 
 ## Licensing note
 

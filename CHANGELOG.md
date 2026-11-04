@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the Azbil C2/C3 temperature controller as a read-only scan target over Modbus RTU or CPL:
+  PV/SP scaled by the live PV decimal position, MV, RUN/READY and AUTO/MANUAL, and input alarms
+  reported as degraded because an alarmed PV is pinned to its display limit.
+
 ## 0.1.1 — 2026-11-01
 
 - Add an operator-confirmed balance tare test (`POST /api/tare`): one tare command, then a

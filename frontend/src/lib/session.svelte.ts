@@ -7,6 +7,7 @@ export class ScanSession {
     device: 'taie', port: '', baudrate: 19200, parity: 'N', stopbits: 1,
     timeout_s: 0.5, start_address: 1, end_address: 6, balance_protocol: 'gs_cpa',
     balance_lines: 10, balance_start_output: false, tare_timeout_s: 5, tare_zero_tolerance_g: 0.05,
+    azbil_temp_protocol: 'modbus_rtu',
   });
   ports: PortInfo[] = $state([]);
   job: ScanJob | null = $state(null);
@@ -64,7 +65,8 @@ export class ScanSession {
 
   selectDevice(device: DeviceType) {
     this.config.device = device;
-    if (device === 'azbil') {
+    if (device === 'azbil' || device === 'azbil_temp') {
+      if (device === 'azbil_temp') this.config.baudrate = 9600;
       this.config.parity = 'E';
       this.config.stopbits = 1;
       this.config.start_address = Math.min(this.config.start_address, 127);

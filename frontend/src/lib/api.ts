@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
-export type DeviceType = 'taie' | 'azbil' | 'balance';
+export type DeviceType = 'taie' | 'azbil' | 'azbil_temp' | 'balance';
 export type Parity = 'N' | 'E' | 'O';
 
 export interface ScanConfig {
@@ -17,6 +17,7 @@ export interface ScanConfig {
   balance_start_output: boolean;
   tare_timeout_s: number;
   tare_zero_tolerance_g: number;
+  azbil_temp_protocol: 'modbus_rtu' | 'cpl';
 }
 
 export interface PortInfo {
