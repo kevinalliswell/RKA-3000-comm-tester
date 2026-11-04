@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tell apart a silent balance from unreadable bytes: count and log raw balance traffic, and name
+  the next step (send O1, enable output on the balance, or check the serial settings).
+- Report a serial port held by another program as such instead of a raw `PermissionError`.
+
 ## 0.1.1 — 2026-11-01
 
 - Add an operator-confirmed balance tare test (`POST /api/tare`): one tare command, then a

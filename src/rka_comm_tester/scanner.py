@@ -65,7 +65,10 @@ def _run_probe(
                     on_result(result)
                 yield result
     except Exception as exc:  # port open and unexpected driver errors become visible results
-        result = ScanResult(cfg.device, cfg.port, None, "error", detail=f"{type(exc).__name__}: {exc}")
+        detail = f"{type(exc).__name__}: {exc}"
+        if "PermissionError" in detail:
+            detail = f"串口 {cfg.port} 被其他程序占用或无权访问，请关闭占用它的程序后重试（{detail}）"
+        result = ScanResult(cfg.device, cfg.port, None, "error", detail=detail)
         logger.exception("%s failed", operation)
         if on_result:
             on_result(result)
@@ -193,6 +196,21 @@ def _close_balance(client, output_started: bool) -> None:
     client.close()
 
 
+def _balance_no_frames(cfg: ScanConfig, client, received: int) -> tuple[str, dict, str]:
+    """Separate a silent line from unreadable bytes; the next step differs for each."""
+    values: dict = {"observed": [], "bytes_received": received}
+    if received:
+        values["last_rx_hex"] = client.last_raw[:32].hex(" ")
+        return "degraded", values, f"收到 {received} 字节但没有可解析的帧，请核对波特率、校验位和停止位"
+    if cfg.balance_protocol == "longteng":
+        hint = "工具不向龙腾天平发送命令，只能接收其主动输出，请在天平上开启连续输出"
+    elif cfg.balance_start_output:
+        hint = "已发送 O1 仍无输出"
+    else:
+        hint = "未发送 O1，天平可能未开启连续输出，请勾选「发送 O1」后重试"
+    return "offline", values, f"未收到任何字节。{hint}；另请核对串口号、波特率和收发接线"
+
+
 def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
     client = _open_balance(cfg)
     output_started = False
@@ -214,9 +232,12 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             if message.kind == "error":
                 yield ScanResult(cfg.device, cfg.port, None, "error", {"raw": message.raw}, "天平返回错误帧")
                 return
-        status = "degraded" if observed else "offline"
-        detail = "未收到稳定称重帧" if observed else "未收到天平数据"
-        yield ScanResult(cfg.device, cfg.port, None, status, {"observed": observed[-5:]}, detail)
+        if observed:
+            yield ScanResult(cfg.device, cfg.port, None, "degraded",
+                             {"observed": observed[-5:]}, "未收到稳定称重帧")
+        else:
+            status, values, detail = _balance_no_frames(cfg, client, client.bytes_received)
+            yield ScanResult(cfg.device, cfg.port, None, status, values, detail)
     finally:
         _close_balance(client, output_started)
 
@@ -240,6 +261,7 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             return
         # A buffered pre-tare zero must not be mistaken for confirmation.
         client.reset_input_buffer()
+        received_before = client.bytes_received
         client.send_tare()
         logger.info("balance tare command sent: %r", client.protocol.tare_command())
         observed: list[str] = []
@@ -278,7 +300,10 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         elif observed:
             status, detail = "degraded", f"天平已响应，但 {cfg.tare_timeout_s:g} 秒内未收到可确认的稳定零点"
         else:
-            status, detail = "offline", "已发送去皮命令，但未收到天平数据"
+            status, silence, detail = _balance_no_frames(
+                cfg, client, client.bytes_received - received_before)
+            values |= silence
+            detail = f"已发送去皮命令。{detail}"
         yield ScanResult(cfg.device, cfg.port, None, status, values, detail)
     finally:
         _close_balance(client, output_started)

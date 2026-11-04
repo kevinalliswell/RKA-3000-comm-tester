@@ -202,6 +202,8 @@ def _fake_balance(monkeypatch, frames, *, on_read=None, clock=None):
     calls = []
 
     class FakeClient:
+        bytes_received = 0
+
         def __init__(self, settings, protocol):
             self.protocol = protocol
             self.frames = iter(frames)

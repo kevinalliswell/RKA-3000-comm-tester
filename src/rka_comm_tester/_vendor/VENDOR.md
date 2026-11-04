@@ -25,6 +25,8 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
 - `balance_serial/client.py`: optional monotonic deadlines on line/message reads cap
   each byte read by the remaining time and restore the serial timeout on every exit,
   so continuous data without a newline cannot prolong tare confirmation.
+- `balance_serial/client.py`: count and debug-log raw bytes, because `errors="ignore"` can
+  turn bytes from a wrong baud rate into an empty line that looks like silence.
 - `balance_serial/models.py`: serial writes use the configured timeout so O1/O0 do not
   wait indefinitely for an unavailable output buffer.
 
