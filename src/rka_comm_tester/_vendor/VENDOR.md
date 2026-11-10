@@ -18,6 +18,11 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   the requested register count and write echo.
 - `balance_serial/protocols/{gs_cpa,longteng}.py`: accept only documented full weight
   frames; Longteng `ST` frames are marked stable.
+- `balance_serial/protocols/longteng.py`: parse the JD series frame from its manual and field
+  captures (`+00100.001  g`; a blank unit field is unstable), treat command echoes as ACK and
+  `Err` as an error, and add `poll_command()` (`P`) because the factory output mode only
+  answers a print request. `ST,` frames are still accepted. See `docs/longteng-jd-balance.md`.
+- `balance_serial/protocols/base.py`: `poll_command()` defaults to `None` (streaming protocols).
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
   an ACK or an unstable zero.
 - `balance_serial/client.py`: `reset_input_buffer()` lets the tare test discard frames

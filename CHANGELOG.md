@@ -5,6 +5,12 @@
 - Tell apart a silent balance from unreadable bytes: count and log raw balance traffic, and name
   the next step (send O1, enable output on the balance, or check the serial settings).
 - Report a serial port held by another program as such instead of a raw `PermissionError`.
+- Read Longteng JD balances as documented: parse `+00100.001  g` frames (blank unit means
+  unstable), send the print command `P` because the factory output mode only answers it, treat
+  command echoes as ACKs and `Err` as an error, and default to 2400 bps for Longteng.
+- Say which protocol the received weight frames belong to when the other one is selected, and
+  stop recommending O1 for a silent balance that may be a Longteng.
+- Add `docs/longteng-jd-balance.md`, the balance's serial protocol and 2021 field captures.
 
 ## 0.1.1 — 2026-11-01
 

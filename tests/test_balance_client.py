@@ -136,11 +136,11 @@ def test_silent_after_o1_does_not_repeat_that_advice(monkeypatch):
     assert bytes(port.written) == b"O1\r\nO0\r\n"
 
 
-def test_silent_longteng_points_at_the_balance_not_at_o1(monkeypatch):
+def test_silent_longteng_was_asked_for_readings_and_names_its_settings(monkeypatch):
     result, port = _scan(monkeypatch, [], balance_protocol="longteng")
     assert result.status == "offline"
-    assert "龙腾" in result.detail and "O1" not in result.detail
-    assert not port.written
+    assert "打印命令 P" in result.detail and "2400" in result.detail and "O1" not in result.detail
+    assert bytes(port.written) == b"P\r\n" * 4  # once up front, then after each silent read
 
 
 def test_bytes_erased_by_decoding_are_not_reported_as_silence(monkeypatch):
@@ -195,3 +195,74 @@ def test_port_held_by_another_program_says_so(monkeypatch):
     assert result.status == "error"
     assert "被其他程序占用" in result.detail
     assert "PermissionError" in result.detail
+
+
+class _JdBalance(_LinePort):
+    """Longteng JD balance in its factory command-output mode (C5-2), per the manual and
+    the 2021 debug records: echo every command, answer P with one reading, T zeroes."""
+
+    def __init__(self, weight=b"+00100.001  g"):
+        super().__init__()
+        self.weight = weight
+        self.buffer = bytearray()
+        self.timeout = 0.05
+
+    def write(self, data):
+        super().write(data)
+        command = bytes(data).strip()
+        self.buffer += command + b"\r\n"
+        if command == b"P":
+            self.buffer += self.weight + b"\r\n"
+        elif command == b"T":
+            self.weight = b"+00000.000  g"
+
+    def read(self, size=1):
+        data, self.buffer = bytes(self.buffer[:size]), self.buffer[size:]
+        return data
+
+    def readline(self):
+        end = self.buffer.find(b"\n")
+        return self.read(len(self.buffer) if end < 0 else end + 1)
+
+    def reset_input_buffer(self):
+        self.buffer.clear()
+
+
+def test_command_mode_longteng_is_read_by_asking_for_a_print(monkeypatch):
+    port = _JdBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", baudrate=2400,
+                                    balance_protocol="longteng")))
+    assert (result.status, result.values["weight_g"]) == ("online", 100.001)
+    assert set(bytes(port.written).split(b"\r\n")) <= {b"P", b""}  # never O, C or M
+
+
+def test_command_mode_longteng_tare_confirms_zero(monkeypatch):
+    port = _JdBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    config = ScanConfig(device="balance", port="COM3", baudrate=2400, balance_protocol="longteng",
+                        timeout_s=0.05)
+    [result] = list(tare_test(config))
+    assert result.status == "online"
+    assert result.values["before_g"] == 100.001
+    assert (result.values["ack"], result.values["after_g"]) == ("T", 0.0)
+    assert set(bytes(port.written).split(b"\r\n")) <= {b"P", b"T", b""}
+
+
+def test_unstable_and_non_gram_readings_are_not_online(monkeypatch):
+    for weight in (b"+00100.001   ", b"+00012.000pcs"):
+        port = _JdBalance(weight)
+        monkeypatch.setattr("serial.Serial", port)
+        [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng",
+                                        balance_lines=4)))
+        assert result.status == "degraded"
+
+
+@pytest.mark.parametrize("picked, frame, advice", [
+    ("gs_cpa", b"+00100.001  g\r\n", "改选龙腾协议"),
+    ("longteng", b"+0277.19 G S\r\n", "改选GS-CPA协议"),
+])
+def test_frames_of_the_other_protocol_name_it(monkeypatch, picked, frame, advice):
+    result, _ = _scan(monkeypatch, [frame] * 3, balance_protocol=picked)
+    assert result.status == "degraded"
+    assert advice in result.detail

@@ -15,6 +15,10 @@ class BalanceProtocol(ABC):
     def shutdown_commands(self) -> Sequence[bytes]:
         return ()
 
+    def poll_command(self) -> bytes | None:
+        """Request one reading from a balance that does not stream on its own."""
+        return None
+
     @abstractmethod
     def tare_command(self) -> bytes:
         raise NotImplementedError

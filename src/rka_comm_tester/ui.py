@@ -216,6 +216,7 @@ class MainWindow(QMainWindow):
             QHeaderView::section { background: #3f4b59; color: #ffffff; border: 0; padding: 5px; font-weight: 600; }
         """)
         self.device.currentIndexChanged.connect(self._device_changed)
+        self.balance_protocol.currentIndexChanged.connect(self._balance_protocol_changed)
         self._device_changed()
         self.refresh_ports()
 
@@ -232,9 +233,15 @@ class MainWindow(QMainWindow):
             self.stopbits.setCurrentText("1")
             self.end_address.setValue(min(self.end_address.value(), 127))
         elif is_balance:
-            self.baud.setCurrentText("1200")
+            self._balance_protocol_changed()
             self.parity.setCurrentText("N")
             self.stopbits.setCurrentText("1")
+
+    def _balance_protocol_changed(self) -> None:
+        # Longteng JD factory setting C4-0 is 2400 bps; GS-CPA examples use 1200 bps.
+        if self.device.currentData() == "balance":
+            longteng = self.balance_protocol.currentData() == "longteng"
+            self.baud.setCurrentText("2400" if longteng else "1200")
 
     def refresh_ports(self) -> None:
         current = self.port.currentText()

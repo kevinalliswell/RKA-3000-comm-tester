@@ -220,6 +220,9 @@ def _fake_balance(monkeypatch, frames, *, on_read=None, clock=None):
         def send_tare(self):
             calls.append("tare")
 
+        def send_bytes(self, data):
+            calls.append(data.decode().strip())
+
         def read_message(self, *, deadline=None):
             if clock is not None:
                 clock.now += 0.25

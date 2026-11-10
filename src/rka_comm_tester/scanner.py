@@ -175,7 +175,34 @@ def _open_balance(cfg: ScanConfig):
 
 
 def _is_stable_weight(message) -> bool:
-    return message.kind == "reading" and message.stable is True and message.weight is not None
+    return (message.kind == "reading" and message.stable is True and message.weight is not None
+            and message.unit == "g")
+
+
+def _request_reading(client) -> None:
+    """Ask a command-output balance for one reading; streaming protocols send nothing."""
+    command = client.protocol.poll_command()
+    if command is not None:
+        client.send_bytes(command)
+
+
+def _poll_echo(client) -> str | None:
+    command = client.protocol.poll_command()
+    return command.decode("ascii").strip() if command else None
+
+
+def _other_protocol_hint(cfg: ScanConfig, observed: list[str]) -> str:
+    """Name the protocol whose weight frames these are, when the operator picked the other."""
+    from ._vendor.balance_serial.protocols.gs_cpa import GSCpaProtocol
+    from ._vendor.balance_serial.protocols.longteng import LongtengProtocol
+
+    other, label = ((LongtengProtocol(), "龙腾") if cfg.balance_protocol == "gs_cpa"
+                    else (GSCpaProtocol(auto_continuous_output=False), "GS-CPA"))
+    for raw in observed:
+        message = other.parse_message(raw)
+        if message is not None and message.kind == "reading":
+            return f"；收到的是{label}格式的称重帧，请改选{label}协议"
+    return ""
 
 
 def _start_balance_output(cfg: ScanConfig, client) -> bool:
@@ -203,12 +230,14 @@ def _balance_no_frames(cfg: ScanConfig, client, received: int) -> tuple[str, dic
         values["last_rx_hex"] = client.last_raw[:32].hex(" ")
         return "degraded", values, f"收到 {received} 字节但没有可解析的帧，请核对波特率、校验位和停止位"
     if cfg.balance_protocol == "longteng":
-        hint = "工具不向龙腾天平发送命令，只能接收其主动输出，请在天平上开启连续输出"
+        hint = ("已发送打印命令 P 仍无输出，请核对波特率（出厂 2400 bps，参数 C4）、"
+                "串口号和直连串口线（2-2、3-3、5-5）")
     elif cfg.balance_start_output:
-        hint = "已发送 O1 仍无输出"
+        hint = "已发送 O1 仍无输出，请核对串口号、波特率和收发接线"
     else:
-        hint = "未发送 O1，天平可能未开启连续输出，请勾选「发送 O1」后重试"
-    return "offline", values, f"未收到任何字节。{hint}；另请核对串口号、波特率和收发接线"
+        hint = ("未向天平发送任何命令。龙腾天平请改选龙腾协议，不要勾选 O1；"
+                "GS-CPA 天平可勾选「发送 O1」后重试；另请核对串口号、波特率和收发接线")
+    return "offline", values, f"未收到任何字节。{hint}"
 
 
 def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
@@ -217,12 +246,14 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
     try:
         client.open()
         output_started = _start_balance_output(cfg, client)
+        _request_reading(client)
         observed: list[str] = []
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 break
             message = client.read_message()
             if message is None:
+                _request_reading(client)
                 continue
             observed.append(message.raw)
             if _is_stable_weight(message):
@@ -233,8 +264,8 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
                 yield ScanResult(cfg.device, cfg.port, None, "error", {"raw": message.raw}, "天平返回错误帧")
                 return
         if observed:
-            yield ScanResult(cfg.device, cfg.port, None, "degraded",
-                             {"observed": observed[-5:]}, "未收到稳定称重帧")
+            yield ScanResult(cfg.device, cfg.port, None, "degraded", {"observed": observed[-5:]},
+                             f"未收到稳定称重帧{_other_protocol_hint(cfg, observed)}")
         else:
             status, values, detail = _balance_no_frames(cfg, client, client.bytes_received)
             yield ScanResult(cfg.device, cfg.port, None, status, values, detail)
@@ -250,11 +281,14 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         output_started = _start_balance_output(cfg, client)
         # Best-effort baseline so the operator can see how much weight was tared off.
         values: dict = {}
+        _request_reading(client)
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 return
             message = client.read_message()
-            if message is not None and _is_stable_weight(message):
+            if message is None:
+                _request_reading(client)
+            elif _is_stable_weight(message):
                 values["before_g"] = message.weight
                 break
         if stop.is_set():
@@ -277,9 +311,11 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             if time.monotonic() >= deadline:
                 break
             if message is None:
+                _request_reading(client)
                 continue
             if message.kind == "ack":
-                values["ack"] = message.code
+                if message.code != _poll_echo(client):
+                    values["ack"] = message.code
             elif message.kind == "error":
                 values["raw"] = message.raw
                 yield ScanResult(cfg.device, cfg.port, None, "error", values,

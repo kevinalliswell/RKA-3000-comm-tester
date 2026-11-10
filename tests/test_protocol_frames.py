@@ -138,6 +138,31 @@ def test_balance_parsers_accept_only_documented_reading_frames():
     assert longteng.parse_message("ERR 12.345").kind == "unknown"
 
 
+@pytest.mark.parametrize("raw, weight, stable, unit", [
+    # Field captures from the 2021-06-23 and 2021-07-01 debug sessions (JD series, 0.001 g).
+    (bytes.fromhex("2B30303030392E3034322020670D0A"), 9.042, True, "g"),
+    (b"+00100.001  g\r\n", 100.001, True, "g"),
+    (b"-00100.002  g\r\n", -100.002, True, "g"),
+    (b"+00000.000  g\r\n", 0.0, True, "g"),
+    # Manual §6.1 example, and an unstable reading whose unit field is all spaces.
+    (b"+0010.0000 g\r\n", 10.0, True, "g"),
+    (b"+00100.001   \r\n", 100.001, False, None),
+    (b"+00012.000pcs\r\n", 12.0, True, "pcs"),
+])
+def test_longteng_jd_frames_from_manual_and_field_captures(raw, weight, stable, unit):
+    message = LongtengProtocol().parse_message(raw.decode("ascii"))
+    assert (message.kind, message.weight, message.stable, message.unit) == (
+        "reading", weight, stable, unit)
+
+
+def test_longteng_command_echoes_and_rejections():
+    longteng = LongtengProtocol()
+    assert [longteng.parse_message(code).kind for code in "OTCMP"] == ["ack"] * 5
+    assert longteng.parse_message("Err").kind == "error"
+    assert longteng.poll_command() == b"P\r\n"
+    assert GSCpaProtocol().poll_command() is None
+
+
 def test_balance_tare_requires_stable_zero_not_ack_or_unstable_zero():
     client = BalanceClient(PortSettings("unused"), GSCpaProtocol())
     messages = iter([
