@@ -9,8 +9,11 @@ from .base import BalanceProtocol
 # right-aligned 3-character unit field. An all-space unit field marks an unstable reading.
 # A 3-character unit fills the field, so it can follow the digits without a space.
 _PATTERN_FRAME = re.compile(r"^([+-]\d+(?:\.\d+)?)\s*([^\s\d.+-]{1,3})?$")
-# Older upstream format, kept for balances already configured that way.
-_PATTERN_ST = re.compile(r"^ST,\s*([+-]?\d+\.\d+)$")
+# Headed frames, as captured on the RKA-3000 balance on 2026-11-11 ("ST,-0045.578  g", lines
+# end in CR LF LF): "ST" marks a stable reading. "US" is taken as unstable by the common
+# convention of this frame family; any other header stays unknown. The unit may be absent,
+# as in the older upstream format "ST,12.345", which was always grams.
+_PATTERN_HEADED = re.compile(r"^(ST|US),\s*([+-]?\d+(?:\.\d+)?)\s*([^\s\d.+-]{1,3})?$")
 # §4.2: the balance echoes every accepted command and answers "Err" otherwise.
 _COMMAND_ECHOES = {"O", "T", "C", "M", "P"}
 
@@ -48,16 +51,15 @@ class LongtengProtocol(BalanceProtocol):
                 unit=unit,
             )
 
-        match = _PATTERN_ST.fullmatch(line)
+        match = _PATTERN_HEADED.fullmatch(line)
         if not match:
             return BalanceMessage(protocol=self.name, raw=line, kind="unknown")
 
-        weight = float(match.group(1))
         return BalanceMessage(
             protocol=self.name,
             raw=line,
             kind="reading",
-            weight=weight,
-            stable=True,
-            unit="g",
+            weight=float(match.group(2)),
+            stable=match.group(1) == "ST",
+            unit=match.group(3) or "g",
         )

@@ -186,6 +186,16 @@ def _request_reading(client) -> None:
         client.send_bytes(command)
 
 
+def _read_or_poll(client, **kwargs):
+    """Read one message and poll again only after a silent read. A blank line (some balances
+    end frames with CR LF LF) is traffic, so it must not trigger another print request."""
+    received = client.bytes_received
+    message = client.read_message(**kwargs)
+    if message is None and client.bytes_received == received:
+        _request_reading(client)
+    return message
+
+
 def _poll_echo(client) -> str | None:
     command = client.protocol.poll_command()
     return command.decode("ascii").strip() if command else None
@@ -251,9 +261,8 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 break
-            message = client.read_message()
+            message = _read_or_poll(client)
             if message is None:
-                _request_reading(client)
                 continue
             observed.append(message.raw)
             if _is_stable_weight(message):
@@ -285,10 +294,8 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 return
-            message = client.read_message()
-            if message is None:
-                _request_reading(client)
-            elif _is_stable_weight(message):
+            message = _read_or_poll(client)
+            if message is not None and _is_stable_weight(message):
                 values["before_g"] = message.weight
                 break
         if stop.is_set():
@@ -303,7 +310,7 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         while time.monotonic() < deadline:
             if stop.is_set():
                 return
-            message = client.read_message(deadline=deadline)
+            message = _read_or_poll(client, deadline=deadline)
             if message is not None:
                 observed.append(message.raw)
             # A read (or driver scheduling) may finish at/after the deadline.
@@ -311,7 +318,6 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             if time.monotonic() >= deadline:
                 break
             if message is None:
-                _request_reading(client)
                 continue
             if message.kind == "ack":
                 if message.code != _poll_echo(client):

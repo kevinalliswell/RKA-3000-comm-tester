@@ -8,6 +8,8 @@
 - Read Longteng JD balances as documented: parse `+00100.001  g` frames (blank unit means
   unstable), send the print command `P` because the factory output mode only answers it, treat
   command echoes as ACKs and `Err` as an error, and default to 2400 bps for Longteng.
+- Parse the headed frames captured on the RKA-3000 balance (`ST,-0045.578  g`, ending CR LF LF);
+  only a timed-out read sends another `P`, so the blank line after each frame does not.
 - Say which protocol the received weight frames belong to when the other one is selected, and
   stop recommending O1 for a silent balance that may be a Longteng.
 - Add `docs/longteng-jd-balance.md`, the balance's serial protocol and 2021 field captures.

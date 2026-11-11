@@ -250,7 +250,7 @@ def test_command_mode_longteng_tare_confirms_zero(monkeypatch):
 
 
 def test_unstable_and_non_gram_readings_are_not_online(monkeypatch):
-    for weight in (b"+00100.001   ", b"+00012.000pcs"):
+    for weight in (b"+00100.001   ", b"+00012.000pcs", b"US,+0001.234  g"):
         port = _JdBalance(weight)
         monkeypatch.setattr("serial.Serial", port)
         [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng",
@@ -266,3 +266,18 @@ def test_frames_of_the_other_protocol_name_it(monkeypatch, picked, frame, advice
     result, _ = _scan(monkeypatch, [frame] * 3, balance_protocol=picked)
     assert result.status == "degraded"
     assert advice in result.detail
+
+
+# 2026-11-11 capture from the RKA-3000 balance in continuous output, byte for byte.
+_CAPTURE_2026_11_11 = bytes.fromhex("53542C2D303034352E3537382020670D0A0A")
+
+
+def test_field_capture_stream_reads_online_without_extra_print_requests(monkeypatch):
+    # Start mid-stream on the trailing LF, as a real port opened between frames would.
+    stream = b"\n" + _CAPTURE_2026_11_11 * 3
+    lines = stream.splitlines(keepends=True)
+    result, port = _scan(monkeypatch, lines, baudrate=2400, balance_protocol="longteng",
+                         balance_lines=10)
+    assert (result.status, result.values["weight_g"]) == ("online", -45.578)
+    # Only the request sent on opening; the blank lines of CR LF LF are not silence.
+    assert bytes(port.written) == b"P\r\n"
