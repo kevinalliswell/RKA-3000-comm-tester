@@ -130,6 +130,8 @@ def test_balance_scan_treats_unstable_as_degraded_and_o1_as_opt_in(monkeypatch):
     shutdowns = []
 
     class FakeClient:
+        bytes_received = 0
+
         def __init__(self, settings, protocol):
             assert settings.to_serial_kwargs()["write_timeout"] == settings.timeout
             self.protocol = protocol
@@ -172,6 +174,8 @@ def test_cancel_closes_balance_probe_before_scan_returns(monkeypatch):
     cleanup = []
 
     class FakeClient:
+        bytes_received = 0
+
         def __init__(self, settings, protocol):
             self.protocol = protocol
 
@@ -202,6 +206,8 @@ def _fake_balance(monkeypatch, frames, *, on_read=None, clock=None):
     calls = []
 
     class FakeClient:
+        bytes_received = 0
+
         def __init__(self, settings, protocol):
             self.protocol = protocol
             self.frames = iter(frames)
@@ -217,6 +223,9 @@ def _fake_balance(monkeypatch, frames, *, on_read=None, clock=None):
 
         def send_tare(self):
             calls.append("tare")
+
+        def send_bytes(self, data):
+            calls.append(data.decode().strip())
 
         def read_message(self, *, deadline=None):
             if clock is not None:

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ScanSession } from './lib/session.svelte';
-  import type { DeviceType, ScanResult } from './lib/api';
+  import type { DeviceType, ScanConfig, ScanResult } from './lib/api';
 
   const session = new ScanSession();
   const deviceNames: Record<DeviceType, string> = {
@@ -78,10 +78,11 @@
           {#if isBalance}
             <div class="section-divider"><span>天平选项</span></div>
             <div class="field-grid two">
-              <label class="field"><span>协议</span><select bind:value={session.config.balance_protocol}><option value="gs_cpa">GS-CPA</option><option value="longteng">龙腾</option></select></label>
+              <label class="field"><span>协议</span><select value={session.config.balance_protocol} onchange={(event) => session.selectBalanceProtocol(event.currentTarget.value as ScanConfig['balance_protocol'])}><option value="gs_cpa">GS-CPA</option><option value="longteng">龙腾</option></select></label>
               <label class="field"><span>读取帧数</span><input type="number" bind:value={session.config.balance_lines} min="1" max="100" step="1" required /></label>
             </div>
             <label class="toggle-row"><input type="checkbox" bind:checked={session.config.balance_start_output} disabled={session.config.balance_protocol !== 'gs_cpa'} /><span>发送 O1 启动连续输出（结束时发送 O0）</span></label>
+            {#if session.config.balance_protocol === 'longteng'}<p class="hint">龙腾 JD 出厂为命令输出（C5-2）、2400 bps 8N1（C4-0）；工具发送打印命令 P 读取，不发送 O1。</p>{/if}
             <div class="section-divider"><span>去皮测试</span><span class="hint">发送去皮命令并等待稳定零点</span></div>
             <div class="field-grid two">
               <label class="field"><span>等待 / 秒</span><input type="number" bind:value={session.config.tare_timeout_s} min="1" max="30" step="0.5" required /></label>

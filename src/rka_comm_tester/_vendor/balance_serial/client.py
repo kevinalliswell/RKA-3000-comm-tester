@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Iterator
 
@@ -7,6 +8,8 @@ import serial
 
 from .models import BalanceMessage, PortSettings, TareResult
 from .protocols.base import BalanceProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class BalanceClient:
@@ -23,6 +26,8 @@ class BalanceClient:
         self.encoding = encoding
         self.errors = errors
         self._serial: serial.Serial | None = None
+        self.bytes_received = 0
+        self.last_raw = b""
 
     def __enter__(self) -> "BalanceClient":
         self.open()
@@ -56,6 +61,7 @@ class BalanceClient:
     def send_bytes(self, data: bytes) -> None:
         self._ensure_open()
         assert self._serial is not None
+        logger.debug("发送: %s", data.hex(" "))
         self._serial.write(data)
         self._serial.flush()
 
@@ -147,6 +153,10 @@ class BalanceClient:
                 self._serial.timeout = original_timeout
         if not raw_bytes:
             return None
+        # decode(errors="ignore") can erase every byte, so count them before decoding.
+        self.bytes_received += len(raw_bytes)
+        self.last_raw = bytes(raw_bytes)
+        logger.debug("接收: %s", raw_bytes.hex(" "))
         return raw_bytes.decode(self.encoding, errors=self.errors).strip()
 
     def read_message(self, *, deadline: float | None = None) -> BalanceMessage | None:

@@ -18,6 +18,13 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
   the requested register count and write echo.
 - `balance_serial/protocols/{gs_cpa,longteng}.py`: accept only documented full weight
   frames; Longteng `ST` frames are marked stable.
+- `balance_serial/protocols/longteng.py`: parse the JD series frame from its manual and field
+  captures (`+00100.001  g`; a blank unit field is unstable), treat command echoes as ACK and
+  `Err` as an error, and add `poll_command()` (`P`) because the factory output mode only
+  answers a print request. Headed frames from a second, not yet identified model
+  (`ST,-0045.578  g`, `ST` stable, `US` unstable) are parsed with their unit; a unit-less
+  `ST,` frame is grams. See `docs/longteng-jd-balance.md` and `docs/balance-st-header.md`.
+- `balance_serial/protocols/base.py`: `poll_command()` defaults to `None` (streaming protocols).
 - `balance_serial/client.py`: tare confirmation requires a stable zero reading, not merely
   an ACK or an unstable zero.
 - `balance_serial/client.py`: `reset_input_buffer()` lets the tare test discard frames
@@ -25,6 +32,8 @@ re-apply or drop each correction explicitly after comparing upstream behavior:
 - `balance_serial/client.py`: optional monotonic deadlines on line/message reads cap
   each byte read by the remaining time and restore the serial timeout on every exit,
   so continuous data without a newline cannot prolong tare confirmation.
+- `balance_serial/client.py`: count and debug-log raw bytes, because `errors="ignore"` can
+  turn bytes from a wrong baud rate into an empty line that looks like silence.
 - `balance_serial/models.py`: serial writes use the configured timeout so O1/O0 do not
   wait indefinitely for an unavailable output buffer.
 

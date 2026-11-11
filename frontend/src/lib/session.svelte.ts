@@ -70,10 +70,16 @@ export class ScanSession {
       this.config.start_address = Math.min(this.config.start_address, 127);
       this.config.end_address = Math.min(this.config.end_address, 127);
     } else if (device === 'balance') {
-      this.config.baudrate = 1200;
+      this.selectBalanceProtocol(this.config.balance_protocol);
       this.config.parity = 'N';
       this.config.stopbits = 1;
     }
+  }
+
+  selectBalanceProtocol(protocol: ScanConfig['balance_protocol']) {
+    this.config.balance_protocol = protocol;
+    // Longteng JD factory setting C4-0 is 2400 bps; GS-CPA examples use 1200 bps.
+    this.config.baudrate = protocol === 'longteng' ? 2400 : 1200;
   }
 
   async refreshPorts() {

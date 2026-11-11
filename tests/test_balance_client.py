@@ -1,11 +1,14 @@
 from types import SimpleNamespace
 
 import pytest
+from serial import SerialException
 
 from rka_comm_tester._vendor.balance_serial import client as balance_client
 from rka_comm_tester._vendor.balance_serial.client import BalanceClient
 from rka_comm_tester._vendor.balance_serial.models import PortSettings
 from rka_comm_tester._vendor.balance_serial.protocols.gs_cpa import GSCpaProtocol
+from rka_comm_tester.config import ScanConfig
+from rka_comm_tester.scanner import scan, tare_test
 
 
 class _TimedSerial:
@@ -83,3 +86,265 @@ def test_deadline_read_restores_serial_timeout_after_error(timed_client):
     with pytest.raises(OSError, match="serial read failed"):
         client.read_message(deadline=1.0)
     assert serial_port.timeout == 10.0
+
+
+class _LinePort:
+    """Serves whole readline() results, the way pyserial does on a real port."""
+
+    is_open = True
+
+    def __init__(self, lines=()):
+        self.lines = list(lines)
+        self.written = bytearray()
+
+    def __call__(self, **kwargs):  # stands in for the serial.Serial constructor
+        return self
+
+    def readline(self):
+        return self.lines.pop(0) if self.lines else b""
+
+    def write(self, data):
+        self.written.extend(data)
+
+    def flush(self): ...
+
+    def reset_input_buffer(self): ...
+
+    def close(self): ...
+
+
+def _scan(monkeypatch, lines, **changes):
+    port = _LinePort(lines)
+    monkeypatch.setattr("serial.Serial", port)
+    params = dict(device="balance", port="COM3", balance_lines=3) | changes
+    [result] = list(scan(ScanConfig(**params)))
+    return result, port
+
+
+def test_silent_gs_cpa_scan_points_at_o1_and_stays_listen_only(monkeypatch):
+    result, port = _scan(monkeypatch, [])
+    assert result.status == "offline"
+    assert result.values["bytes_received"] == 0
+    assert "勾选「发送 O1」" in result.detail
+    assert not port.written
+
+
+def test_silent_after_o1_does_not_repeat_that_advice(monkeypatch):
+    result, port = _scan(monkeypatch, [], balance_start_output=True)
+    assert result.status == "offline"
+    assert "已发送 O1" in result.detail and "勾选" not in result.detail
+    assert bytes(port.written) == b"O1\r\nO0\r\n"
+
+
+def test_silent_longteng_was_asked_for_readings_and_names_its_settings(monkeypatch):
+    result, port = _scan(monkeypatch, [], balance_protocol="longteng")
+    assert result.status == "offline"
+    assert "打印命令 P" in result.detail and "2400" in result.detail and "O1" not in result.detail
+    assert bytes(port.written) == b"P\r\n" * 4  # once up front, then after each silent read
+
+
+def test_bytes_erased_by_decoding_are_not_reported_as_silence(monkeypatch):
+    # Wrong baud rate: nothing here survives decode(errors="ignore").
+    result, _ = _scan(monkeypatch, [b"\xff\xfe\x80", b"\r\n"])
+    assert result.status == "degraded"
+    assert result.values["bytes_received"] == 5
+    assert result.values["last_rx_hex"] == "0d 0a"
+    assert "波特率" in result.detail
+
+
+def test_parseable_frames_keep_their_own_result(monkeypatch):
+    result, _ = _scan(monkeypatch, [b"+0277.19 G U\r\n"])
+    assert (result.status, result.detail) == ("degraded", "未收到稳定称重帧")
+    assert result.values == {"observed": ["+0277.19 G U"]}
+
+
+def test_traffic_is_logged_in_both_directions(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger="rka_comm_tester._vendor.balance_serial.client")
+    _scan(monkeypatch, [b"+1 G S\r\n"], balance_start_output=True)
+    assert "发送: 4f 31 0d 0a" in caplog.text
+    assert "接收: 2b 31 20 47 20 53 0d 0a" in caplog.text
+
+
+def test_tare_silence_counts_only_bytes_after_the_command(monkeypatch):
+    port = _LinePort([b"+0012.50 G S\r\n"])
+    monkeypatch.setattr("serial.Serial", port)
+    config = ScanConfig(device="balance", port="COM3", balance_lines=1, tare_timeout_s=1,
+                        timeout_s=0.05)
+    clock = SimpleNamespace(now=0.0)
+
+    def monotonic():
+        clock.now += 0.3
+        return clock.now
+
+    monkeypatch.setattr("rka_comm_tester.scanner.time", SimpleNamespace(monotonic=monotonic))
+    monkeypatch.setattr(balance_client, "time", SimpleNamespace(monotonic=monotonic))
+    port.read = lambda size: b""
+    port.timeout = 0.05
+    [result] = list(tare_test(config))
+    assert result.status == "offline"
+    assert result.values["bytes_received"] == 0
+    assert result.detail.startswith("已发送去皮命令。")
+
+
+def test_port_held_by_another_program_says_so(monkeypatch):
+    def refuse(**kwargs):
+        raise SerialException("could not open port 'COM3': PermissionError(13, '拒绝访问。', None, 5)")
+
+    monkeypatch.setattr("serial.Serial", refuse)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3")))
+    assert result.status == "error"
+    assert "被其他程序占用" in result.detail
+    assert "PermissionError" in result.detail
+
+
+class _JdBalance(_LinePort):
+    """Longteng JD balance in its factory command-output mode (C5-2), per the manual and
+    the 2021 debug records: echo every command, answer P with one reading, T zeroes."""
+
+    def __init__(self, weight=b"+00100.001  g"):
+        super().__init__()
+        self.weight = weight
+        self.buffer = bytearray()
+        self.timeout = 0.05
+
+    def write(self, data):
+        super().write(data)
+        command = bytes(data).strip()
+        self.buffer += command + b"\r\n"
+        if command == b"P":
+            self.buffer += self.weight + b"\r\n"
+        elif command == b"T":
+            self.weight = b"+00000.000  g"
+
+    def read(self, size=1):
+        data, self.buffer = bytes(self.buffer[:size]), self.buffer[size:]
+        return data
+
+    def readline(self):
+        end = self.buffer.find(b"\n")
+        return self.read(len(self.buffer) if end < 0 else end + 1)
+
+    def reset_input_buffer(self):
+        self.buffer.clear()
+
+
+def test_command_mode_longteng_is_read_by_asking_for_a_print(monkeypatch):
+    port = _JdBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", baudrate=2400,
+                                    balance_protocol="longteng")))
+    assert (result.status, result.values["weight_g"]) == ("online", 100.001)
+    assert set(bytes(port.written).split(b"\r\n")) <= {b"P", b""}  # never O, C or M
+
+
+def test_command_mode_longteng_tare_confirms_zero(monkeypatch):
+    port = _JdBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    config = ScanConfig(device="balance", port="COM3", baudrate=2400, balance_protocol="longteng",
+                        timeout_s=0.05)
+    [result] = list(tare_test(config))
+    assert result.status == "online"
+    assert result.values["before_g"] == 100.001
+    assert (result.values["ack"], result.values["after_g"]) == ("T", 0.0)
+    assert set(bytes(port.written).split(b"\r\n")) <= {b"P", b"T", b""}
+
+
+def test_unstable_and_non_gram_readings_are_not_online(monkeypatch):
+    for weight in (b"+00100.001   ", b"+00012.000pcs", b"US,+0001.234  g"):
+        port = _JdBalance(weight)
+        monkeypatch.setattr("serial.Serial", port)
+        [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng",
+                                        balance_lines=4)))
+        assert result.status == "degraded"
+
+
+@pytest.mark.parametrize("picked, frame, advice", [
+    ("gs_cpa", b"+00100.001  g\r\n", "改选龙腾协议"),
+    ("longteng", b"+0277.19 G S\r\n", "改选GS-CPA协议"),
+])
+def test_frames_of_the_other_protocol_name_it(monkeypatch, picked, frame, advice):
+    result, _ = _scan(monkeypatch, [frame] * 3, balance_protocol=picked)
+    assert result.status == "degraded"
+    assert advice in result.detail
+
+
+# 2026-11-11 capture from a balance with "ST," headed frames (model not yet identified, see
+# docs/balance-st-header.md) in continuous output, byte for byte.
+_CAPTURE_2026_11_11 = bytes.fromhex("53542C2D303034352E3537382020670D0A0A")
+
+
+def test_field_capture_stream_reads_online_without_extra_print_requests(monkeypatch):
+    # Start mid-stream on the trailing LF, as a real port opened between frames would.
+    stream = b"\n" + _CAPTURE_2026_11_11 * 3
+    lines = stream.splitlines(keepends=True)
+    result, port = _scan(monkeypatch, lines, baudrate=2400, balance_protocol="longteng",
+                         balance_lines=10)
+    assert (result.status, result.values["weight_g"]) == ("online", -45.578)
+    # Only the request sent on opening; the blank lines of CR LF LF are not silence.
+    assert bytes(port.written) == b"P\r\n"
+
+
+class _StHeaderBalance(_JdBalance):
+    """ST-headed balance in continuous output, replaying the 2026-11-11 15:38 capture:
+    P only adds an echo line; the first T echo collided with a frame ("TT,-0045.565  g"),
+    output paused, then zero frames followed."""
+
+    def __init__(self):
+        super().__init__()
+        self.buffer += b"ST,-0045.565  g\r\n\n" * 3
+
+    def write(self, data):
+        _LinePort.write(self, data)
+        command = bytes(data).strip()
+        if command == b"P":
+            self.buffer += b"P\r\n\n"
+        elif command == b"T":
+            self.buffer += b"TT,-0045.565  g\r\n\n" + b"ST,+0000.000  g\r\n\n" * 3
+
+
+def test_continuous_rka_balance_scan_ignores_print_echo(monkeypatch):
+    port = _StHeaderBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", baudrate=2400,
+                                    balance_protocol="longteng")))
+    assert (result.status, result.values["weight_g"]) == ("online", -45.565)
+    assert bytes(port.written) == b"P\r\n"
+
+
+def test_tare_survives_echo_colliding_with_a_frame(monkeypatch):
+    port = _StHeaderBalance()
+    monkeypatch.setattr("serial.Serial", port)
+    config = ScanConfig(device="balance", port="COM3", baudrate=2400, balance_protocol="longteng",
+                        timeout_s=0.05)
+    [result] = list(tare_test(config))
+    assert result.status == "online"
+    assert (result.values["before_g"], result.values["after_g"]) == (-45.565, 0.0)
+    assert "ack" not in result.values  # the only T echo arrived glued to a frame
+    assert bytes(port.written) == b"P\r\nT\r\n"
+
+
+def test_scan_says_which_longteng_frame_format_answered(monkeypatch):
+    jd = _JdBalance()
+    monkeypatch.setattr("serial.Serial", jd)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng")))
+    assert result.detail.endswith("（龙腾 JD 格式）")
+    headed = _StHeaderBalance()
+    monkeypatch.setattr("serial.Serial", headed)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng")))
+    assert result.detail.endswith("（ST 帧头格式）")
+
+
+def test_longteng_tare_echo_without_weight_never_suggests_o1(monkeypatch):
+    class EchoOnly(_JdBalance):
+        def write(self, data):
+            _LinePort.write(self, data)
+            command = bytes(data).strip()
+            if command == b"T":
+                self.buffer += b"T\r\n"
+
+    port = EchoOnly()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(tare_test(ScanConfig(device="balance", port="COM3", balance_protocol="longteng",
+                                         balance_lines=1, tare_timeout_s=1, timeout_s=0.05)))
+    assert (result.status, result.values["ack"]) == ("degraded", "T")
+    assert "O1" not in result.detail and "P" in result.detail

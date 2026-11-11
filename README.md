@@ -20,6 +20,8 @@
 | 文档 | 内容 |
 |---|---|
 | [通讯协议与诊断边界](docs/protocols.md) | TAIE Modbus RTU、Azbil CPL、GS-CPA 与龙腾协议的帧、寄存器、状态判定、天平去皮测试和只读边界 |
+| [龙腾 JD 系列电子天平](docs/longteng-jd-balance.md) | 说明书中的串口参数、输出方式、帧格式和命令，以及 2021 年现场调试记录 |
+| [带 ST 帧头的电子天平](docs/balance-st-header.md) | 2026-11-11 实测的另一型号（型号待确认）：帧格式、`P`/`T` 行为，以及与龙腾 JD 的对照 |
 | [技术架构设计](docs/technical-architecture.md) | Tauri、Svelte、Python sidecar、进程生命周期、数据边界与 CI/CD |
 | [分层设计思路](docs/layered-design.md) | 六层职责、依赖方向、端口注入、新增协议步骤和测试对应关系 |
 | [分层与运行时细节](docs/architecture.md) | 扫描状态机、API 约定、进程收尾和扩展说明 |

@@ -65,7 +65,10 @@ def _run_probe(
                     on_result(result)
                 yield result
     except Exception as exc:  # port open and unexpected driver errors become visible results
-        result = ScanResult(cfg.device, cfg.port, None, "error", detail=f"{type(exc).__name__}: {exc}")
+        detail = f"{type(exc).__name__}: {exc}"
+        if "PermissionError" in detail:
+            detail = f"串口 {cfg.port} 被其他程序占用或无权访问，请关闭占用它的程序后重试（{detail}）"
+        result = ScanResult(cfg.device, cfg.port, None, "error", detail=detail)
         logger.exception("%s failed", operation)
         if on_result:
             on_result(result)
@@ -172,7 +175,51 @@ def _open_balance(cfg: ScanConfig):
 
 
 def _is_stable_weight(message) -> bool:
-    return message.kind == "reading" and message.stable is True and message.weight is not None
+    return (message.kind == "reading" and message.stable is True and message.weight is not None
+            and message.unit == "g")
+
+
+def _request_reading(client) -> None:
+    """Ask a command-output balance for one reading; streaming protocols send nothing."""
+    command = client.protocol.poll_command()
+    if command is not None:
+        client.send_bytes(command)
+
+
+def _read_or_poll(client, **kwargs):
+    """Read one message and poll again only after a silent read. A blank line (some balances
+    end frames with CR LF LF) is traffic, so it must not trigger another print request."""
+    received = client.bytes_received
+    message = client.read_message(**kwargs)
+    if message is None and client.bytes_received == received:
+        _request_reading(client)
+    return message
+
+
+def _poll_echo(client) -> str | None:
+    command = client.protocol.poll_command()
+    return command.decode("ascii").strip() if command else None
+
+
+def _frame_label(cfg: ScanConfig, raw: str) -> str:
+    """The Longteng protocol reads two balance models; say which one answered."""
+    if cfg.balance_protocol != "longteng":
+        return ""
+    return "（ST 帧头格式）" if raw.startswith(("ST,", "US,")) else "（龙腾 JD 格式）"
+
+
+def _other_protocol_hint(cfg: ScanConfig, observed: list[str]) -> str:
+    """Name the protocol whose weight frames these are, when the operator picked the other."""
+    from ._vendor.balance_serial.protocols.gs_cpa import GSCpaProtocol
+    from ._vendor.balance_serial.protocols.longteng import LongtengProtocol
+
+    other, label = ((LongtengProtocol(), "龙腾") if cfg.balance_protocol == "gs_cpa"
+                    else (GSCpaProtocol(auto_continuous_output=False), "GS-CPA"))
+    for raw in observed:
+        message = other.parse_message(raw)
+        if message is not None and message.kind == "reading":
+            return f"；收到的是{label}格式的称重帧，请改选{label}协议"
+    return ""
 
 
 def _start_balance_output(cfg: ScanConfig, client) -> bool:
@@ -193,30 +240,52 @@ def _close_balance(client, output_started: bool) -> None:
     client.close()
 
 
+def _balance_no_frames(cfg: ScanConfig, client, received: int) -> tuple[str, dict, str]:
+    """Separate a silent line from unreadable bytes; the next step differs for each."""
+    values: dict = {"observed": [], "bytes_received": received}
+    if received:
+        values["last_rx_hex"] = client.last_raw[:32].hex(" ")
+        return "degraded", values, f"收到 {received} 字节但没有可解析的帧，请核对波特率、校验位和停止位"
+    if cfg.balance_protocol == "longteng":
+        hint = ("已发送打印命令 P 仍无输出，请核对波特率（龙腾 JD 出厂 2400 bps，参数 C4）、"
+                "串口号和直连串口线（2-2、3-3、5-5）")
+    elif cfg.balance_start_output:
+        hint = "已发送 O1 仍无输出，请核对串口号、波特率和收发接线"
+    else:
+        hint = ("未向天平发送任何命令。龙腾天平请改选龙腾协议，不要勾选 O1；"
+                "GS-CPA 天平可勾选「发送 O1」后重试；另请核对串口号、波特率和收发接线")
+    return "offline", values, f"未收到任何字节。{hint}"
+
+
 def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
     client = _open_balance(cfg)
     output_started = False
     try:
         client.open()
         output_started = _start_balance_output(cfg, client)
+        _request_reading(client)
         observed: list[str] = []
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 break
-            message = client.read_message()
+            message = _read_or_poll(client)
             if message is None:
                 continue
             observed.append(message.raw)
             if _is_stable_weight(message):
                 yield ScanResult(cfg.device, cfg.port, None, "online",
-                                 {"weight_g": message.weight, "raw": message.raw}, "稳定称重帧有效")
+                                 {"weight_g": message.weight, "raw": message.raw},
+                                 f"稳定称重帧有效{_frame_label(cfg, message.raw)}")
                 return
             if message.kind == "error":
                 yield ScanResult(cfg.device, cfg.port, None, "error", {"raw": message.raw}, "天平返回错误帧")
                 return
-        status = "degraded" if observed else "offline"
-        detail = "未收到稳定称重帧" if observed else "未收到天平数据"
-        yield ScanResult(cfg.device, cfg.port, None, status, {"observed": observed[-5:]}, detail)
+        if observed:
+            yield ScanResult(cfg.device, cfg.port, None, "degraded", {"observed": observed[-5:]},
+                             f"未收到稳定称重帧{_other_protocol_hint(cfg, observed)}")
+        else:
+            status, values, detail = _balance_no_frames(cfg, client, client.bytes_received)
+            yield ScanResult(cfg.device, cfg.port, None, status, values, detail)
     finally:
         _close_balance(client, output_started)
 
@@ -229,10 +298,11 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         output_started = _start_balance_output(cfg, client)
         # Best-effort baseline so the operator can see how much weight was tared off.
         values: dict = {}
+        _request_reading(client)
         for _ in range(cfg.balance_lines):
             if stop.is_set():
                 return
-            message = client.read_message()
+            message = _read_or_poll(client)
             if message is not None and _is_stable_weight(message):
                 values["before_g"] = message.weight
                 break
@@ -240,6 +310,7 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             return
         # A buffered pre-tare zero must not be mistaken for confirmation.
         client.reset_input_buffer()
+        received_before = client.bytes_received
         client.send_tare()
         logger.info("balance tare command sent: %r", client.protocol.tare_command())
         observed: list[str] = []
@@ -247,7 +318,7 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         while time.monotonic() < deadline:
             if stop.is_set():
                 return
-            message = client.read_message(deadline=deadline)
+            message = _read_or_poll(client, deadline=deadline)
             if message is not None:
                 observed.append(message.raw)
             # A read (or driver scheduling) may finish at/after the deadline.
@@ -257,7 +328,8 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             if message is None:
                 continue
             if message.kind == "ack":
-                values["ack"] = message.code
+                if message.code != _poll_echo(client):
+                    values["ack"] = message.code
             elif message.kind == "error":
                 values["raw"] = message.raw
                 yield ScanResult(cfg.device, cfg.port, None, "error", values,
@@ -274,11 +346,17 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         if "after_g" in values:
             status, detail = "degraded", f"已发送去皮命令，但 {cfg.tare_timeout_s:g} 秒内未读到稳定零点"
         elif "ack" in values:
-            status, detail = "degraded", "天平已应答去皮命令，但未收到称重帧；可启用 O1 连续输出后重试"
+            # O1 is a GS-CPA command; on a Longteng balance "O" is the on/off key.
+            hint = ("已发送打印命令 P 仍无称重帧" if cfg.balance_protocol == "longteng"
+                    else "可启用 O1 连续输出后重试")
+            status, detail = "degraded", f"天平已应答去皮命令，但未收到称重帧；{hint}"
         elif observed:
             status, detail = "degraded", f"天平已响应，但 {cfg.tare_timeout_s:g} 秒内未收到可确认的稳定零点"
         else:
-            status, detail = "offline", "已发送去皮命令，但未收到天平数据"
+            status, silence, detail = _balance_no_frames(
+                cfg, client, client.bytes_received - received_before)
+            values |= silence
+            detail = f"已发送去皮命令。{detail}"
         yield ScanResult(cfg.device, cfg.port, None, status, values, detail)
     finally:
         _close_balance(client, output_started)
