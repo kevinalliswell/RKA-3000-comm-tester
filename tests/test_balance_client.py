@@ -281,3 +281,42 @@ def test_field_capture_stream_reads_online_without_extra_print_requests(monkeypa
     assert (result.status, result.values["weight_g"]) == ("online", -45.578)
     # Only the request sent on opening; the blank lines of CR LF LF are not silence.
     assert bytes(port.written) == b"P\r\n"
+
+
+class _RkaContinuous(_JdBalance):
+    """RKA-3000 balance in continuous output, replaying the 2026-11-11 15:38 capture:
+    P only adds an echo line; the first T echo collided with a frame ("TT,-0045.565  g"),
+    output paused, then zero frames followed."""
+
+    def __init__(self):
+        super().__init__()
+        self.buffer += b"ST,-0045.565  g\r\n\n" * 3
+
+    def write(self, data):
+        _LinePort.write(self, data)
+        command = bytes(data).strip()
+        if command == b"P":
+            self.buffer += b"P\r\n\n"
+        elif command == b"T":
+            self.buffer += b"TT,-0045.565  g\r\n\n" + b"ST,+0000.000  g\r\n\n" * 3
+
+
+def test_continuous_rka_balance_scan_ignores_print_echo(monkeypatch):
+    port = _RkaContinuous()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", baudrate=2400,
+                                    balance_protocol="longteng")))
+    assert (result.status, result.values["weight_g"]) == ("online", -45.565)
+    assert bytes(port.written) == b"P\r\n"
+
+
+def test_tare_survives_echo_colliding_with_a_frame(monkeypatch):
+    port = _RkaContinuous()
+    monkeypatch.setattr("serial.Serial", port)
+    config = ScanConfig(device="balance", port="COM3", baudrate=2400, balance_protocol="longteng",
+                        timeout_s=0.05)
+    [result] = list(tare_test(config))
+    assert result.status == "online"
+    assert (result.values["before_g"], result.values["after_g"]) == (-45.565, 0.0)
+    assert "ack" not in result.values  # the only T echo arrived glued to a frame
+    assert bytes(port.written) == b"P\r\nT\r\n"
