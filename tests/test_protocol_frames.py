@@ -148,7 +148,7 @@ def test_balance_parsers_accept_only_documented_reading_frames():
     (b"+0010.0000 g\r\n", 10.0, True, "g"),
     (b"+00100.001   \r\n", 100.001, False, None),
     (b"+00012.000pcs\r\n", 12.0, True, "pcs"),
-    # 2026-11-11 capture on the RKA-3000 balance: "ST," header, frames end in CR LF LF.
+    # 2026-11-11 capture from an ST-headed balance (another model): frames end in CR LF LF.
     (bytes.fromhex("53542C2D303034352E3537382020670D0A0A"), -45.578, True, "g"),
     (b"US,+0001.234  g\r\n", 1.234, False, "g"),
     (b"ST,12.345\r\n", 12.345, True, "g"),  # older upstream format, unit implied

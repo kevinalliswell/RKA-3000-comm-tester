@@ -268,7 +268,8 @@ def test_frames_of_the_other_protocol_name_it(monkeypatch, picked, frame, advice
     assert advice in result.detail
 
 
-# 2026-11-11 capture from the RKA-3000 balance in continuous output, byte for byte.
+# 2026-11-11 capture from a balance with "ST," headed frames (model not yet identified, see
+# docs/balance-st-header.md) in continuous output, byte for byte.
 _CAPTURE_2026_11_11 = bytes.fromhex("53542C2D303034352E3537382020670D0A0A")
 
 
@@ -283,8 +284,8 @@ def test_field_capture_stream_reads_online_without_extra_print_requests(monkeypa
     assert bytes(port.written) == b"P\r\n"
 
 
-class _RkaContinuous(_JdBalance):
-    """RKA-3000 balance in continuous output, replaying the 2026-11-11 15:38 capture:
+class _StHeaderBalance(_JdBalance):
+    """ST-headed balance in continuous output, replaying the 2026-11-11 15:38 capture:
     P only adds an echo line; the first T echo collided with a frame ("TT,-0045.565  g"),
     output paused, then zero frames followed."""
 
@@ -302,7 +303,7 @@ class _RkaContinuous(_JdBalance):
 
 
 def test_continuous_rka_balance_scan_ignores_print_echo(monkeypatch):
-    port = _RkaContinuous()
+    port = _StHeaderBalance()
     monkeypatch.setattr("serial.Serial", port)
     [result] = list(scan(ScanConfig(device="balance", port="COM3", baudrate=2400,
                                     balance_protocol="longteng")))
@@ -311,7 +312,7 @@ def test_continuous_rka_balance_scan_ignores_print_echo(monkeypatch):
 
 
 def test_tare_survives_echo_colliding_with_a_frame(monkeypatch):
-    port = _RkaContinuous()
+    port = _StHeaderBalance()
     monkeypatch.setattr("serial.Serial", port)
     config = ScanConfig(device="balance", port="COM3", baudrate=2400, balance_protocol="longteng",
                         timeout_s=0.05)
@@ -320,3 +321,30 @@ def test_tare_survives_echo_colliding_with_a_frame(monkeypatch):
     assert (result.values["before_g"], result.values["after_g"]) == (-45.565, 0.0)
     assert "ack" not in result.values  # the only T echo arrived glued to a frame
     assert bytes(port.written) == b"P\r\nT\r\n"
+
+
+def test_scan_says_which_longteng_frame_format_answered(monkeypatch):
+    jd = _JdBalance()
+    monkeypatch.setattr("serial.Serial", jd)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng")))
+    assert result.detail.endswith("（龙腾 JD 格式）")
+    headed = _StHeaderBalance()
+    monkeypatch.setattr("serial.Serial", headed)
+    [result] = list(scan(ScanConfig(device="balance", port="COM3", balance_protocol="longteng")))
+    assert result.detail.endswith("（ST 帧头格式）")
+
+
+def test_longteng_tare_echo_without_weight_never_suggests_o1(monkeypatch):
+    class EchoOnly(_JdBalance):
+        def write(self, data):
+            _LinePort.write(self, data)
+            command = bytes(data).strip()
+            if command == b"T":
+                self.buffer += b"T\r\n"
+
+    port = EchoOnly()
+    monkeypatch.setattr("serial.Serial", port)
+    [result] = list(tare_test(ScanConfig(device="balance", port="COM3", balance_protocol="longteng",
+                                         balance_lines=1, tare_timeout_s=1, timeout_s=0.05)))
+    assert (result.status, result.values["ack"]) == ("degraded", "T")
+    assert "O1" not in result.detail and "P" in result.detail

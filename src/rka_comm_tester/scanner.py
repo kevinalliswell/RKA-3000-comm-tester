@@ -201,6 +201,13 @@ def _poll_echo(client) -> str | None:
     return command.decode("ascii").strip() if command else None
 
 
+def _frame_label(cfg: ScanConfig, raw: str) -> str:
+    """The Longteng protocol reads two balance models; say which one answered."""
+    if cfg.balance_protocol != "longteng":
+        return ""
+    return "（ST 帧头格式）" if raw.startswith(("ST,", "US,")) else "（龙腾 JD 格式）"
+
+
 def _other_protocol_hint(cfg: ScanConfig, observed: list[str]) -> str:
     """Name the protocol whose weight frames these are, when the operator picked the other."""
     from ._vendor.balance_serial.protocols.gs_cpa import GSCpaProtocol
@@ -240,7 +247,7 @@ def _balance_no_frames(cfg: ScanConfig, client, received: int) -> tuple[str, dic
         values["last_rx_hex"] = client.last_raw[:32].hex(" ")
         return "degraded", values, f"收到 {received} 字节但没有可解析的帧，请核对波特率、校验位和停止位"
     if cfg.balance_protocol == "longteng":
-        hint = ("已发送打印命令 P 仍无输出，请核对波特率（出厂 2400 bps，参数 C4）、"
+        hint = ("已发送打印命令 P 仍无输出，请核对波特率（龙腾 JD 出厂 2400 bps，参数 C4）、"
                 "串口号和直连串口线（2-2、3-3、5-5）")
     elif cfg.balance_start_output:
         hint = "已发送 O1 仍无输出，请核对串口号、波特率和收发接线"
@@ -267,7 +274,8 @@ def _scan_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
             observed.append(message.raw)
             if _is_stable_weight(message):
                 yield ScanResult(cfg.device, cfg.port, None, "online",
-                                 {"weight_g": message.weight, "raw": message.raw}, "稳定称重帧有效")
+                                 {"weight_g": message.weight, "raw": message.raw},
+                                 f"稳定称重帧有效{_frame_label(cfg, message.raw)}")
                 return
             if message.kind == "error":
                 yield ScanResult(cfg.device, cfg.port, None, "error", {"raw": message.raw}, "天平返回错误帧")
@@ -338,7 +346,10 @@ def _tare_balance(cfg: ScanConfig, stop: Event) -> Iterator[ScanResult]:
         if "after_g" in values:
             status, detail = "degraded", f"已发送去皮命令，但 {cfg.tare_timeout_s:g} 秒内未读到稳定零点"
         elif "ack" in values:
-            status, detail = "degraded", "天平已应答去皮命令，但未收到称重帧；可启用 O1 连续输出后重试"
+            # O1 is a GS-CPA command; on a Longteng balance "O" is the on/off key.
+            hint = ("已发送打印命令 P 仍无称重帧" if cfg.balance_protocol == "longteng"
+                    else "可启用 O1 连续输出后重试")
+            status, detail = "degraded", f"天平已应答去皮命令，但未收到称重帧；{hint}"
         elif observed:
             status, detail = "degraded", f"天平已响应，但 {cfg.tare_timeout_s:g} 秒内未收到可确认的稳定零点"
         else:
